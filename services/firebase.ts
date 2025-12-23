@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 // Fonction de récupération des variables d'environnement compatible Vite/Next/CRA
 const getEnv = (key: string) => {
@@ -37,6 +38,7 @@ const config = {
 // Initialisation sécurisée
 let app;
 let authInstance;
+let dbInstance;
 
 const hasValidConfig = config.apiKey && config.projectId && config.authDomain;
 
@@ -48,19 +50,15 @@ if (hasValidConfig) {
       app = getApp();
     }
     authInstance = getAuth(app);
+    dbInstance = getFirestore(app);
   } catch (error) {
     console.error("Firebase Initialization Error:", error);
   }
 } else {
-  // Mode dégradé : on n'initialise pas Firebase si la config est incomplète
-  // Cela permet à l'UI de gérer l'état "Non connecté / Config manquante" sans crasher
-  console.warn("⚠️ Firebase Config manquante ou incomplète. Vérifiez vos variables d'environnement (VITE_FIREBASE_API_KEY, etc.) dans Vercel.");
-  console.log("Config détectée:", {
-    apiKey: config.apiKey ? 'OK' : 'MISSING',
-    projectId: config.projectId ? 'OK' : 'MISSING',
-    authDomain: config.authDomain ? 'OK' : 'MISSING'
-  });
+  // Mode dégradé
+  console.warn("⚠️ Firebase Config manquante. Vérifiez vos variables d'environnement.");
 }
 
 export const auth = authInstance;
+export const db = dbInstance;
 export const googleProvider = new GoogleAuthProvider();

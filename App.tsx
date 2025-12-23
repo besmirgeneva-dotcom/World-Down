@@ -12,6 +12,7 @@ import SettingsModal from './components/SettingsModal';
 import { Country, GameState, StatType, GameEvent, Alliance } from './types';
 import { simulateTurn } from './services/geminiService';
 import { auth } from './services/firebase';
+import { getUserSaves, saveGameToFirestore, deleteSaveFromFirestore, GameSaveData } from './services/saveService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { Globe, Play, Loader2, Swords, History, Users, Settings, Eye, Cpu } from 'lucide-react';
 
@@ -38,12 +39,14 @@ type ViewMode = 'HOME' | 'HUB' | 'GAME';
 
 export default function App() {
   const [view, setView] = useState<ViewMode>('HOME');
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+  const [user, setUser] = useState<{ uid: string; name: string; email: string } | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   
-  const [saves, setSaves] = useState<{ id: string; name: string; turn: number; date: string; status: string }[]>([]);
+  // Utilisation de GameSaveData qui inclut le gameState complet
+  const [saves, setSaves] = useState<GameSaveData[]>([]);
+  const [isLoadingSaves, setIsLoadingSaves] = useState(false);
 
   const [gameState, setGameState] = useState<GameState>({
     turn: 1,
@@ -76,6 +79,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
+          uid: firebaseUser.uid,
           name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Commandant',
           email: firebaseUser.email || ''
         });
@@ -90,6 +94,17 @@ export default function App() {
     return () => unsubscribe();
   }, [view]);
 
+  // Charger les sauvegardes quand on arrive sur le HUB
+  useEffect(() => {
+    if (user && view === 'HUB') {
+      setIsLoadingSaves(true);
+      getUserSaves(user.uid)
+        .then(fetchedSaves => setSaves(fetchedSaves))
+        .catch(console.error)
+        .finally(() => setIsLoadingSaves(false));
+    }
+  }, [user, view]);
+
   // Auto-switch view mode based on action, but allows manual override now
   useEffect(() => {
     if (['Alliance', 'Rejoindre Alliance', 'Quitter Alliance'].includes(commandAction)) {
@@ -98,7 +113,7 @@ export default function App() {
   }, [commandAction]);
 
   const handleLogin = (userData: { name: string; email: string }) => {
-    setUser(userData);
+    // Note: The actual user setting happens in onAuthStateChanged
     setIsLoginModalOpen(false);
     setView('HUB');
   };
@@ -107,6 +122,7 @@ export default function App() {
     if (!auth) return;
     try {
       await signOut(auth);
+      setSaves([]); // Vider les sauvegardes locales
     } catch (error) {
       console.error("Logout failed", error);
     }
@@ -170,16 +186,53 @@ export default function App() {
     } catch (e) { setGameState(prev => ({ ...prev, isSimulating: false })); }
   };
 
-  const handleSaveGame = () => {
-    const newSave = {
-      id: Date.now().toString(),
-      name: `Partie ${saves.length + 1} (Tour ${gameState.turn})`,
-      turn: gameState.turn,
-      date: new Date().toLocaleDateString('fr-FR', { hour: '2-digit', minute:'2-digit' }),
-      status: 'En cours'
-    };
-    setSaves(prev => [newSave, ...prev]);
+  const handleSaveGame = async () => {
+    if (!user) return;
+    
+    // Fermer la modal immédiatement pour UX
     setIsSettingsOpen(false);
+
+    const saveName = `Partie ${saves.length + 1} (Tour ${gameState.turn})`;
+    
+    try {
+      const newSave = await saveGameToFirestore(user.uid, gameState, saveName);
+      setSaves(prev => [newSave, ...prev]);
+    } catch (error) {
+      console.error("Erreur sauvegarde:", error);
+      alert("Erreur lors de la sauvegarde.");
+    }
+  };
+
+  const handleDeleteSave = async (saveId: string) => {
+    if (!user) return;
+    try {
+      await deleteSaveFromFirestore(user.uid, saveId);
+      setSaves(prev => prev.filter(s => s.id !== saveId));
+    } catch (error) {
+      console.error("Erreur suppression:", error);
+    }
+  };
+
+  const handleLoadGame = (saveId: string) => {
+    const saveToLoad = saves.find(s => s.id === saveId);
+    if (saveToLoad && saveToLoad.gameState) {
+      setGameState(saveToLoad.gameState);
+      setView('GAME');
+    }
+  };
+
+  const handleNewGame = () => {
+    setGameState({
+      turn: 1,
+      countries: INITIAL_COUNTRIES,
+      alliances: INITIAL_ALLIANCES,
+      events: [],
+      selectedCountryId: null,
+      isSimulating: false,
+      gameOver: false,
+      tokensUsed: 0
+    });
+    setView('GAME');
   };
 
   const handleLeaderChange = (allianceId: string, newLeaderId: string) => {
@@ -200,7 +253,18 @@ export default function App() {
   }
 
   if (view === 'HOME') return <><Home onStart={() => setIsLoginModalOpen(true)} /><LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} /></>;
-  if (view === 'HUB' && user) return <Hub user={user} saves={saves} onNewGame={() => setView('GAME')} onLoadGame={() => setView('GAME')} onDeleteSave={(id) => setSaves(s => s.filter(x => x.id !== id))} onLogout={handleLogout} />;
+  
+  // Transformation des GameSaveData en format simple pour le Hub (turn mapping)
+  if (view === 'HUB' && user) return (
+    <Hub 
+      user={user} 
+      saves={saves.map(s => ({ ...s, turn: s.gameState.turn }))} 
+      onNewGame={handleNewGame} 
+      onLoadGame={handleLoadGame} 
+      onDeleteSave={handleDeleteSave} 
+      onLogout={handleLogout} 
+    />
+  );
 
   const selectedCountry = gameState.countries.find(c => c.name === gameState.selectedCountryId);
 
