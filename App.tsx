@@ -44,7 +44,6 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   
-  // Utilisation de GameSaveData qui inclut le gameState complet
   const [saves, setSaves] = useState<GameSaveData[]>([]);
   const [isLoadingSaves, setIsLoadingSaves] = useState(false);
 
@@ -57,7 +56,6 @@ export default function App() {
     isSimulating: false,
     gameOver: false,
     tokensUsed: 0,
-    globalHistorySummary: "", // Initialisation du résumé
   });
 
   const [playerActions, setPlayerActions] = useState<string[]>([]);
@@ -70,7 +68,6 @@ export default function App() {
   const [pendingEvents, setPendingEvents] = useState<GameEvent[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
-  // Monitor Firebase Auth State
   useEffect(() => {
     if (!auth) {
       setIsAuthLoading(false);
@@ -95,7 +92,6 @@ export default function App() {
     return () => unsubscribe();
   }, [view]);
 
-  // Charger les sauvegardes quand on arrive sur le HUB
   useEffect(() => {
     if (user && view === 'HUB') {
       setIsLoadingSaves(true);
@@ -106,7 +102,6 @@ export default function App() {
     }
   }, [user, view]);
 
-  // Auto-switch view mode based on action, but allows manual override now
   useEffect(() => {
     if (['Alliance', 'Rejoindre Alliance', 'Quitter Alliance'].includes(commandAction)) {
       setMapViewMode('alliances');
@@ -114,7 +109,6 @@ export default function App() {
   }, [commandAction]);
 
   const handleLogin = (userData: { name: string; email: string }) => {
-    // Note: The actual user setting happens in onAuthStateChanged
     setIsLoginModalOpen(false);
     setView('HUB');
   };
@@ -123,7 +117,7 @@ export default function App() {
     if (!auth) return;
     try {
       await signOut(auth);
-      setSaves([]); // Vider les sauvegardes locales
+      setSaves([]); 
     } catch (error) {
       console.error("Logout failed", error);
     }
@@ -172,37 +166,50 @@ export default function App() {
   const handleNextTurn = async () => {
     if (gameState.isSimulating) return;
     setGameState(prev => ({ ...prev, isSimulating: true }));
+    
     try {
+      // Le service gère maintenant le "Lazy Mode" et le "Hybrid Engine" en interne
+      // Il retourne statUpdates qui contient à la fois les updates IA et les updates Passifs Locaux
       const result = await simulateTurn(
           gameState.turn, 
           gameState.countries, 
           playerActions, 
-          gameState.events,
-          gameState.globalHistorySummary // On passe le résumé actuel
+          gameState.events
       );
       
       const newEvents: GameEvent[] = result.events.map(desc => ({ turn: gameState.turn, description: desc }));
       setPendingEvents(newEvents);
       
-      setGameState(prev => ({ 
+      setGameState(prev => {
+        // Appliquer les mises à jour (qu'elles viennent de l'IA ou du moteur local)
+        const updatedCountries = prev.countries.map(country => {
+            const updates = result.statUpdates[country.name];
+            if (updates) {
+                return { ...country, stats: { ...country.stats, ...updates } };
+            }
+            return country;
+        });
+
+        return { 
           ...prev, 
           turn: prev.turn + 1, 
+          countries: updatedCountries,
           events: [...prev.events, ...newEvents], 
           tokensUsed: (prev.tokensUsed || 0) + result.tokenUsage,
           isSimulating: false,
-          // Mise à jour du résumé si l'IA en a renvoyé un nouveau (tous les 10 tours)
-          globalHistorySummary: result.newSummary || prev.globalHistorySummary 
-      }));
+        };
+      });
+
       setPlayerActions([]);
-    } catch (e) { setGameState(prev => ({ ...prev, isSimulating: false })); }
+    } catch (e) { 
+        setGameState(prev => ({ ...prev, isSimulating: false })); 
+        console.error(e);
+    }
   };
 
   const handleSaveGame = async () => {
     if (!user) return;
-    
-    // Fermer la modal immédiatement pour UX
     setIsSettingsOpen(false);
-
     const saveName = `Partie ${saves.length + 1} (Tour ${gameState.turn})`;
     
     try {
@@ -227,11 +234,7 @@ export default function App() {
   const handleLoadGame = (saveId: string) => {
     const saveToLoad = saves.find(s => s.id === saveId);
     if (saveToLoad && saveToLoad.gameState) {
-      setGameState({
-          ...saveToLoad.gameState,
-          // Rétro-compatibilité : si une vieille save n'a pas de résumé, on met vide
-          globalHistorySummary: saveToLoad.gameState.globalHistorySummary || "" 
-      });
+      setGameState(saveToLoad.gameState);
       setView('GAME');
     }
   };
@@ -246,7 +249,6 @@ export default function App() {
       isSimulating: false,
       gameOver: false,
       tokensUsed: 0,
-      globalHistorySummary: "" // Reset du résumé pour nouvelle partie
     });
     setView('GAME');
   };
@@ -270,7 +272,6 @@ export default function App() {
 
   if (view === 'HOME') return <><Home onStart={() => setIsLoginModalOpen(true)} /><LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} /></>;
   
-  // Transformation des GameSaveData en format simple pour le Hub (turn mapping)
   if (view === 'HUB' && user) return (
     <Hub 
       user={user} 
@@ -296,7 +297,6 @@ export default function App() {
         onHub={() => setView('HUB')} 
         onQuit={() => setView('HOME')} 
       />
-      {/* Affichage conditionnel de l'Overlay d'Alliance */}
       {mapViewMode === 'alliances' && (
         <AllianceOverlay 
           alliances={gameState.alliances} 
@@ -313,13 +313,11 @@ export default function App() {
             <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg">
               <Globe size={24} className="animate-spin-slow" />
             </div>
-            {/* Suppression du onClick sur le titre */}
             <h1 className="text-2xl md:text-3xl font-tech font-bold text-slate-900 tracking-tighter uppercase cursor-default">
               WORLD<span className="text-blue-600">DOWN</span>
             </h1>
           </div>
           
-          {/* Bouton Paramètres */}
           <button 
             onClick={() => setIsSettingsOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors font-bold text-xs uppercase tracking-wider"
@@ -356,7 +354,6 @@ export default function App() {
             <button onClick={() => setIsCommandMode(true)} className="bg-slate-900 text-white p-3 rounded-2xl shadow-2xl hover:bg-black transition-all group flex items-center gap-3">
                 <Swords size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">Actions</span>
             </button>
-            {/* Bouton Toggle Vue Politique/Alliance */}
             <button 
               onClick={() => setMapViewMode(prev => prev === 'political' ? 'alliances' : 'political')} 
               className={`p-3 rounded-2xl shadow-2xl transition-all group flex items-center gap-3 border ${mapViewMode === 'alliances' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-900 border-slate-100 hover:bg-slate-50'}`}

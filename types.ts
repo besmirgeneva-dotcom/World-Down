@@ -43,7 +43,6 @@ export interface GameState {
   isSimulating: boolean;
   gameOver: boolean;
   tokensUsed: number;
-  globalHistorySummary?: string; // Résumé compressé des tours précédents (maj tous les 10 tours)
 }
 
 export enum StatType {

@@ -18,94 +18,134 @@ const getApiKey = () => {
 const getAI = () => {
   const apiKey = getApiKey();
   if (!apiKey) {
-    console.error("API_KEY is missing. Please set VITE_API_KEY or API_KEY in your environment.");
+    console.error("API_KEY is missing.");
     throw new Error("API Key missing");
   }
   return new GoogleGenAI({ apiKey });
 };
 
 // --- OPTIMIZATION: SHORT CODES ---
-// Dictionnaire pour compresser les noms longs en 1 token
 const COUNTRY_ALIASES: Record<string, string> = {
-  "United States of America": "USA",
-  "United Kingdom": "UK",
-  "Russia": "RUS",
-  "China": "CHN",
-  "Germany": "DEU",
-  "France": "FRA",
-  "India": "IND",
-  "Japan": "JPN",
-  "Brazil": "BRA",
-  "Israel": "ISR",
-  "Iran": "IRN",
-  "North Korea": "PRK",
-  "South Korea": "KOR",
-  "Taiwan": "TWN",
-  "Canada": "CAN",
-  "Australia": "AUS"
+  "United States of America": "USA", "United Kingdom": "UK", "Russia": "RUS",
+  "China": "CHN", "Germany": "DEU", "France": "FRA", "India": "IND",
+  "Japan": "JPN", "Brazil": "BRA", "Israel": "ISR", "Iran": "IRN",
+  "North Korea": "PRK", "South Korea": "KOR", "Taiwan": "TWN",
+  "Canada": "CAN", "Australia": "AUS"
 };
 
-// Fonction inverse pour retrouver le nom complet
 const getFullName = (code: string): string | undefined => {
   const entry = Object.entries(COUNTRY_ALIASES).find(([name, alias]) => alias === code);
   return entry ? entry[0] : undefined;
 };
 
-// Obtient le code court ou utilise les 3 premières lettres
 const getShortCode = (name: string): string => {
   if (COUNTRY_ALIASES[name]) return COUNTRY_ALIASES[name];
   return name.substring(0, 3).toUpperCase();
 };
 
-// --- SMART CONTEXT FILTERING ---
+// --- ENGINE: HYBRID LOGIC ---
+
+// 1. Détection de situation volatile (Guerre, Tension)
+// Si FAUX et aucune action joueur -> Mode Lazy
+const isVolatileSituation = (recentEvents: GameEvent[]): boolean => {
+  const KEYWORDS = ["GUERRE", "WAR", "ATTAQUE", "NUCLÉAIRE", "NUCLEAR", "ANNEXION", "DÉTRUIT", "CRISE", "ALLIANCE", "HOSTILE"];
+  const lastEvents = recentEvents.slice(-3); // On regarde juste les 3 derniers tours
+  const combinedText = lastEvents.map(e => e.description.toUpperCase()).join(" ");
+  return KEYWORDS.some(k => combinedText.includes(k));
+};
+
+// 2. Calcul Local (Moteur mathématique simple)
+const calculatePassiveGrowth = (country: Country): Partial<Country['stats']> => {
+  if (country.isDestroyed) return {};
+
+  const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+  
+  // Économie fluctue légèrement (-2 à +3)
+  let newEco = country.stats.economy + rand(-2, 3);
+  // Population croît doucement (0 à +1) sauf si économie critique
+  let newPop = country.stats.population + (country.stats.economy > 40 ? rand(0, 1) : rand(-1, 0));
+  // Militaire stable ou légère baisse (maintenance)
+  let newMil = country.stats.military + rand(-1, 1);
+
+  // Bornes 0-100
+  return {
+    economy: Math.max(0, Math.min(100, newEco)),
+    military: Math.max(0, Math.min(100, newMil)),
+    population: Math.max(0, Math.min(100, newPop))
+  };
+};
+
 const getRelevantCountries = (countries: Country[], playerActions: string[]): Country[] => {
-  const MAJOR_POWERS = ["USA", "CHN", "RUS", "DEU", "FRA", "UK", "IND"];
+  const MAJOR_POWERS = ["USA", "CHN", "RUS", "DEU", "FRA"]; // Réduit au strict minimum
   const actionsText = playerActions.join(" ").toLowerCase();
 
   return countries.filter(c => {
     const code = getShortCode(c.name);
-    // 1. Majeurs (par code ou nom partiel)
-    if (MAJOR_POWERS.includes(code)) return true;
-    // 2. Interaction active
+    // On garde les pays impliqués dans l'action OU les majeurs
+    // Les autres seront gérés par le moteur local
     if (actionsText.includes(c.name.toLowerCase())) return true;
-    // 3. Nucléaire
-    if (c.stats.hasNuclear) return true;
-    // 4. Guerre/Détruit
-    if (c.isDestroyed || (c.ownerId && c.ownerId !== c.name)) return true;
+    if (MAJOR_POWERS.includes(code)) return true;
+    if (c.stats.hasNuclear && c.stats.military > 90) return true; // Menaces actives
     return false;
   });
 };
 
 const serializeWorldState = (countries: Country[]) => {
   return countries.map(c => {
-    // Format: COD|E|M|P|F
-    // Ex: FRA|80|50|20|N
     let flags = "";
     if (c.stats.hasNuclear) flags += 'N';
     if (c.isDestroyed) flags += 'D';
-    if (c.ownerId && c.ownerId !== c.name) flags += `>${getShortCode(c.ownerId)}`; // >USA indique annexé par USA
+    if (c.ownerId && c.ownerId !== c.name) flags += `>${getShortCode(c.ownerId)}`;
     
-    // Arrondi pour supprimer les décimales inutiles
     const e = Math.floor(c.stats.economy);
     const m = Math.floor(c.stats.military);
     const p = Math.floor(c.stats.population);
     
     return `${getShortCode(c.name)}|${e}|${m}|${p}|${flags}`;
-  }).join(' '); // Espace au lieu de newline économise un peu
+  }).join(' ');
 };
 
 const serializeEvents = (events: GameEvent[]) => {
-  // Uniquement le dernier event, tronqué
-  return events.slice(-1).map(e => `T${e.turn}:${e.description.substring(0, 25)}`).join('|');
+  // OPTIMISATION: Fenêtre glissante stricte (5 derniers tours max)
+  return events.slice(-5).map(e => `T${e.turn}:${e.description.substring(0, 30)}`).join('|');
 };
+
+// --- MAIN SIMULATION ---
 
 export const simulateTurn = async (
   currentTurn: number,
   countries: Country[],
   playerActions: string[],
-  recentEvents: GameEvent[],
-  globalSummary: string = "" 
-): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number, newSummary?: string }> => {
+  recentEvents: GameEvent[]
+): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
+  
+  // STRATEGIE 2: LAZY MODE
+  // Si pas d'action joueur ET situation calme -> Simulation locale uniquement (Coût 0)
+  const isActionTurn = playerActions.length > 0;
+  const isVolatile = isVolatileSituation(recentEvents);
+
+  if (!isActionTurn && !isVolatile) {
+    // Mode Lazy
+    const localUpdates: Record<string, Partial<Country['stats']>> = {};
+    countries.forEach(c => {
+      localUpdates[c.name] = calculatePassiveGrowth(c);
+    });
+    
+    // Un petit event d'ambiance de temps en temps
+    const flavorTexts = [
+      "Marchés stables.", "Calme diplomatique.", "Routine administrative.", 
+      "Légère croissance globale.", "Status quo maintenu."
+    ];
+    const randomEvent = flavorTexts[Math.floor(Math.random() * flavorTexts.length)];
+
+    return {
+      events: [randomEvent],
+      statUpdates: localUpdates,
+      tokenUsage: 0
+    };
+  }
+
+  // Si on est ici, on appelle l'IA (Mode Actif)
   let ai;
   try {
     ai = getAI();
@@ -113,51 +153,61 @@ export const simulateTurn = async (
     return { events: ["ERREUR API"], statUpdates: {}, tokenUsage: 0 };
   }
 
-  const shouldUpdateSummary = currentTurn % 10 === 0;
-  
+  // STRATEGIE 1: HYBRID ENGINE
+  // On n'envoie à l'IA que les pays pertinents pour économiser le contexte
   const relevantCountries = getRelevantCountries(countries, playerActions);
+  
+  // Les pays NON pertinents sont calculés localement
+  const passiveUpdates: Record<string, Partial<Country['stats']>> = {};
+  countries.forEach(c => {
+    if (!relevantCountries.find(r => r.name === c.name)) {
+      passiveUpdates[c.name] = calculatePassiveGrowth(c);
+    }
+  });
+
   const worldState = serializeWorldState(relevantCountries);
   const history = serializeEvents(recentEvents);
-  
-  // Si aucune action, on envoie "Wait" pour dire à l'IA de faire un tour calme
-  const actions = playerActions.length > 0 ? playerActions.join(".") : "Wait";
+  const actions = isActionTurn ? playerActions.join(".") : "Wait";
 
-  // PROMPT TELEGRAPHIQUE
-  // Suppression de tous les mots de liaison. Syntaxe Data-only.
-  const prompt = `
-CTX:GeoPol Sim. LANG:FR. T:${currentTurn}.
-STATE(Cod|E|M|P|Flg): ${worldState}
-HIST:${globalSummary}|${history}
-ACT:${actions}
-
+  // STRATEGIE 3: SYSTEM INSTRUCTION (Caching Ready)
+  // Les règles statiques vont dans le systemInstruction
+  const systemInstruction = `
+ROLE:Game Engine. LANG:FR.
 RULES:
-1.React to ACT. If Wait, minimal change.
-2.High Mil(>80) threatens.
-3.Flg: N=Nuke, D=Dead, >COD=OwnedBy.
-
-OUT(RAW TXT):
+1.React to ACT based on HIST.
+2.If War/Attack -> High Impact.
+3.Eco/Mil/Pop 0-100.
+4.Flg: N=Nuke, D=Dead, >COD=Owned.
+FORMAT OUT:
 #E
-- Event FR (max 1)
+- Event (Short)
 #U
-COD:Eco:Mil:Pop (Ex:FRA:80:55:20)
-${shouldUpdateSummary ? "#S\nGlobalSum(FR)" : ""}
+COD:Eco:Mil:Pop
+`;
+
+  const prompt = `
+CTX:T:${currentTurn}
+STATE:${worldState}
+HIST:${history}
+ACT:${actions}
 `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // Flash est moins cher et suffit largement
+      model: 'gemini-3-flash-preview',
       contents: prompt,
+      config: {
+        systemInstruction: systemInstruction,
+        maxOutputTokens: 200, // Limite stricte pour forcer la concision
+      }
     });
 
     const text = response.text || "";
     const tokenUsage = response.usageMetadata?.totalTokenCount || 0;
 
-    // --- PARSING MANUEL OPTIMISÉ ---
     const events: string[] = [];
-    const statUpdates: Record<string, Partial<Country['stats']>> = {};
-    let newSummary = undefined;
+    const aiUpdates: Record<string, Partial<Country['stats']>> = {};
 
-    // Découpage par marqueurs courts #E, #U, #S
     const parts = text.split('#');
     
     parts.forEach(part => {
@@ -172,36 +222,31 @@ ${shouldUpdateSummary ? "#S\nGlobalSum(FR)" : ""}
         }
         else if (type === 'U') {
             content.split('\n').forEach(line => {
-                // Parsing: COD:E:M:P
                 const segs = line.trim().split(':');
                 if (segs.length >= 4) {
                     const p = parseInt(segs.pop() || "0");
                     const m = parseInt(segs.pop() || "0");
                     const e = parseInt(segs.pop() || "0");
                     const code = segs[0].trim();
-                    
-                    // Traduction Code -> Nom Complet
                     const fullName = getFullName(code) || (countries.find(c => c.name.startsWith(code))?.name);
 
                     if (fullName && !isNaN(e)) {
-                        statUpdates[fullName] = { economy: e, military: m, population: p };
+                        aiUpdates[fullName] = { economy: e, military: m, population: p };
                     }
                 }
             });
         }
-        else if (type === 'S' && shouldUpdateSummary) {
-            newSummary = content;
-        }
     });
 
-    // Fallback events si vide
-    if (events.length === 0) events.push("Calme précaire.");
+    if (events.length === 0) events.push("Tensions palpables.");
+
+    // MERGE: On combine les mises à jour IA (prioritaires) avec les mises à jour passives locales
+    const finalUpdates = { ...passiveUpdates, ...aiUpdates };
 
     return {
         events,
-        statUpdates,
-        tokenUsage,
-        newSummary
+        statUpdates: finalUpdates,
+        tokenUsage
     };
 
   } catch (error) {
