@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { Country, GameEvent } from "../types";
+import { decodeEvent } from "./narrativeEngine";
 
 // Helper robuste pour récupérer la clé API
 const getApiKey = () => {
@@ -43,40 +44,39 @@ const getShortCode = (name: string): string => {
   return name.substring(0, 3).toUpperCase();
 };
 
+const getNameFromCodeOrName = (val: string, countries: Country[]) => {
+    // Try to match short code first
+    const full = getFullName(val);
+    if (full) return full;
+    // Try to match start of name
+    const c = countries.find(c => c.name.toLowerCase().startsWith(val.toLowerCase()) || c.id.toLowerCase() === val.toLowerCase());
+    return c ? c.name : val; 
+}
+
 // --- ENGINE: HYBRID LOGIC ---
 
-// Calcul Local (Moteur mathématique simple)
+// Calcul Local (Moteur mathématique simple) pour les pays passifs
 const calculatePassiveGrowth = (country: Country): Partial<Country['stats']> => {
   if (country.isDestroyed) return {};
 
   const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
   
-  // Économie fluctue légèrement (-2 à +3)
-  let newEco = country.stats.economy + rand(-2, 3);
-  // Population croît doucement (0 à +1) sauf si économie critique
-  let newPop = country.stats.population + (country.stats.economy > 40 ? rand(0, 1) : rand(-1, 0));
-  // Militaire stable ou légère baisse (maintenance)
-  let newMil = country.stats.military + rand(-1, 1);
+  const newEco = Math.max(0, Math.min(100, country.stats.economy + rand(-2, 3)));
+  const newPop = Math.max(0, Math.min(100, country.stats.population + (country.stats.economy > 40 ? rand(0, 1) : rand(-1, 0))));
+  const newMil = Math.max(0, Math.min(100, country.stats.military + rand(-1, 1)));
 
-  // Bornes 0-100
-  return {
-    economy: Math.max(0, Math.min(100, newEco)),
-    military: Math.max(0, Math.min(100, newMil)),
-    population: Math.max(0, Math.min(100, newPop))
-  };
+  return { economy: newEco, military: newMil, population: newPop };
 };
 
 const getRelevantCountries = (countries: Country[], playerActions: string[]): Country[] => {
-  const MAJOR_POWERS = ["USA", "CHN", "RUS", "DEU", "FRA"]; // Réduit au strict minimum
+  const MAJOR_POWERS = ["USA", "CHN", "RUS", "DEU", "FRA"];
   const actionsText = playerActions.join(" ").toLowerCase();
 
   return countries.filter(c => {
     const code = getShortCode(c.name);
-    // On garde les pays impliqués dans l'action OU les majeurs
-    // Les autres seront gérés par le moteur local
     if (actionsText.includes(c.name.toLowerCase())) return true;
     if (MAJOR_POWERS.includes(code)) return true;
-    if (c.stats.hasNuclear && c.stats.military > 90) return true; // Menaces actives
+    if (c.stats.hasNuclear && c.stats.military > 90) return true;
     return false;
   });
 };
@@ -88,37 +88,44 @@ const serializeWorldState = (countries: Country[]) => {
     if (c.isDestroyed) flags += 'D';
     if (c.ownerId && c.ownerId !== c.name) flags += `>${getShortCode(c.ownerId)}`;
     
-    const e = Math.floor(c.stats.economy);
-    const m = Math.floor(c.stats.military);
-    const p = Math.floor(c.stats.population);
-    
-    return `${getShortCode(c.name)}|${e}|${m}|${p}|${flags}`;
+    return `${getShortCode(c.name)}|${Math.floor(c.stats.economy)}|${Math.floor(c.stats.military)}|${Math.floor(c.stats.population)}|${flags}`;
   }).join(' ');
 };
 
-const serializeEvents = (events: GameEvent[]) => {
-  // OPTIMISATION: Fenêtre glissante stricte (5 derniers tours max)
-  return events.slice(-5).map(e => `T${e.turn}:${e.description.substring(0, 30)}`).join('|');
-};
-
-// --- FALLBACK GENERATOR (ZERO TOKEN) ---
-// Génère un texte crédible si l'IA échoue ou si on veut économiser
-const generateFallbackEvent = (actions: string[]): string => {
-    const combined = actions.join(" ").toLowerCase();
+// --- FALLBACK GENERATOR (OFFLINE / FREE MODE) ---
+// Utilise maintenant le NarrativeEngine pour générer du texte de qualité même sans IA
+const generateFallbackLogic = (actions: string[], countries: Country[]) => {
+    const events: string[] = [];
     
-    if (combined.includes("alliance") || combined.includes("diplomatie")) {
-        return "Des traités historiques redessinent les blocs de pouvoir. Les chancelleries du monde entier analysent ce nouveau rapport de force.";
-    }
-    if (combined.includes("guerre") || combined.includes("attaque") || combined.includes("annexer")) {
-        return "Le bruit des bottes résonne. Les marchés s'effondrent alors que les frontières sont redessinées par la force.";
-    }
-    if (combined.includes("nucléaire") || combined.includes("nuclear")) {
-        return "ALERTE DEFCON: L'horloge de l'apocalypse avance. Le monde retient son souffle face à l'escalade atomique.";
-    }
-    if (combined.includes("économique") || combined.includes("sabotage")) {
-        return "Guerre de l'ombre: Des cyber-attaques et sanctions paralysent les infrastructures clés.";
-    }
-    return "L'ordre mondial est en mutation. Les superpuissances ajustent leurs stratégies face aux récents bouleversements.";
+    actions.forEach(action => {
+        const lower = action.toLowerCase();
+        // Extraction basique des noms (très simplifiée pour le fallback)
+        // On suppose que le nom du pays est au début ou mentionné
+        const source = countries.find(c => lower.includes(c.name.toLowerCase()))?.name || "Une Nation";
+        
+        if (lower.includes("alliance")) {
+            events.push(decodeEvent("ALLIANCE_NEW", source, "Coalition"));
+        } else if (lower.includes("rejoint")) {
+            events.push(decodeEvent("ALLIANCE_JOIN", source, "l'Alliance"));
+        } else if (lower.includes("quitte")) {
+            events.push(decodeEvent("ALLIANCE_LEAVE", source, "ses alliés"));
+        } else if (lower.includes("annexé") || lower.includes("conquête")) {
+            events.push(decodeEvent("WAR_WIN", source, "l'ennemi"));
+        } else if (lower.includes("attaque")) {
+            events.push(decodeEvent("GENERIC", source, "la cible"));
+        } else if (lower.includes("nucléaire")) {
+            events.push(decodeEvent("NUKE", source, "la cible"));
+        } else if (lower.includes("blocus")) {
+            events.push(decodeEvent("ECO_BLOCK", source, "la cible"));
+        } else if (lower.includes("sabotage")) {
+            events.push(decodeEvent("SABOTAGE", source, "la cible"));
+        } else {
+            events.push(decodeEvent("GENERIC", source, "le monde"));
+        }
+    });
+
+    if (events.length === 0) events.push("Le calme règne avant la tempête. Les marchés observent la situation.");
+    return events;
 };
 
 // --- MAIN SIMULATION ---
@@ -134,19 +141,17 @@ export const simulateTurn = async (
   try {
     ai = getAI();
   } catch (e) {
-    // Si pas d'API, on utilise le générateur local
+    // Mode Offline / Fallback
     return { 
-        events: [generateFallbackEvent(playerActions)], 
+        events: generateFallbackLogic(playerActions, countries), 
         statUpdates: {}, 
         tokenUsage: 0 
     };
   }
 
-  // STRATEGIE 1: HYBRID ENGINE
   const relevantCountries = getRelevantCountries(countries, playerActions);
-  
-  // Les pays NON pertinents sont calculés localement
   const passiveUpdates: Record<string, Partial<Country['stats']>> = {};
+  
   countries.forEach(c => {
     if (!relevantCountries.find(r => r.name === c.name)) {
       passiveUpdates[c.name] = calculatePassiveGrowth(c);
@@ -154,32 +159,22 @@ export const simulateTurn = async (
   });
 
   const worldState = serializeWorldState(relevantCountries);
-  const history = serializeEvents(recentEvents);
-  const actions = playerActions.length > 0 ? playerActions.join(". ") : "Wait";
+  const history = recentEvents.slice(-3).map(e => `T${e.turn}:${e.description.substring(0, 20)}`).join('|');
+  const actions = playerActions.join(". ");
 
-  // STRATEGIE 3: SYSTEM INSTRUCTION (NARRATIVE MODE)
-  // On demande un style journalistique détaillé
+  // SYSTEM INSTRUCTION: COMPRESSED LOGIC MODE
+  // On demande à l'IA d'agir comme un moteur logique, pas un écrivain.
+  // Elle doit sortir des CODES que notre moteur interne transformera en beau texte.
   const systemInstruction = `
-ROLE: Geopolitical News Analyst. LANG: FR.
-CONTEXT: A strategy game 'World Down'.
-INPUT: 
-- STATE (Country stats)
-- HIST (Past events)
-- ACT (Player actions this turn)
-
-INSTRUCTIONS:
-1. Analyze the impact of ACT on the world.
-2. If ACT is 'Alliance', describe the geopolitical shift and reactions of rivals.
-3. If ACT is 'War', describe the chaos.
-4. Output 1-2 rich, dramatic news headlines. NOT SHORT. DETAILED.
-5. Output updated stats for involved countries.
-
-FORMAT OUT:
+ROLE: Geopolitical Simulator Core.
+INPUT: State, History, Actions.
+TASK: Determine outcomes of actions and random global events.
+OUTPUT FORMAT:
 #E
-[Rich Narrative Event 1]
-[Rich Narrative Event 2 (Optional)]
+EVENT:CODE|SOURCE_CODE|TARGET_CODE|EXTRA_INFO
+(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, NUKE, ECO_BLOCK, SABOTAGE, GENERIC)
 #U
-COD:Eco:Mil:Pop
+CODE:Eco:Mil:Pop
 `;
 
   const prompt = `
@@ -195,8 +190,8 @@ ACT:${actions}
       contents: prompt,
       config: {
         systemInstruction: systemInstruction,
-        maxOutputTokens: 600, // Augmenté pour permettre du détail
-        temperature: 0.8, // Plus créatif
+        maxOutputTokens: 600, // Réduit car on génère du code compressé
+        temperature: 0.7, // Moins de créativité, plus de logique
       }
     });
 
@@ -210,23 +205,33 @@ ACT:${actions}
     
     parts.forEach(part => {
         const type = part.charAt(0);
-        const content = part.substring(1).trim();
+        const lines = part.substring(1).trim().split('\n');
 
         if (type === 'E') {
-            content.split('\n').forEach(line => {
-                const clean = line.replace(/^-\s*/, '').replace(/^\[|\]$/g, '').trim();
-                if (clean.length > 10) events.push(clean);
+            lines.forEach(line => {
+                if (line.startsWith('EVENT:')) {
+                    // Parsing: EVENT:WAR_WIN|USA|CHN|Details
+                    const raw = line.replace('EVENT:', '').trim();
+                    const [code, srcCode, tgtCode, extra] = raw.split('|');
+                    
+                    const srcName = getNameFromCodeOrName(srcCode || "UNK", countries);
+                    const tgtName = getNameFromCodeOrName(tgtCode || "UNK", countries);
+                    
+                    // APPEL AU MOTEUR INTERNE
+                    const richText = decodeEvent(code, srcName, tgtName, extra);
+                    events.push(richText);
+                }
             });
         }
         else if (type === 'U') {
-            content.split('\n').forEach(line => {
+            lines.forEach(line => {
                 const segs = line.trim().split(':');
                 if (segs.length >= 4) {
                     const p = parseInt(segs.pop() || "0");
                     const m = parseInt(segs.pop() || "0");
                     const e = parseInt(segs.pop() || "0");
                     const code = segs[0].trim();
-                    const fullName = getFullName(code) || (countries.find(c => c.name.startsWith(code))?.name);
+                    const fullName = getNameFromCodeOrName(code, countries);
 
                     if (fullName && !isNaN(e)) {
                         aiUpdates[fullName] = { economy: e, military: m, population: p };
@@ -236,24 +241,21 @@ ACT:${actions}
         }
     });
 
-    // Si l'IA n'a rien généré de pertinent, utiliser le fallback local intelligent
     if (events.length === 0) {
-        events.push(generateFallbackEvent(playerActions));
+        // Fallback si l'IA n'a rien sorti d'intelligible
+        events.push(...generateFallbackLogic(playerActions, countries));
     }
-
-    const finalUpdates = { ...passiveUpdates, ...aiUpdates };
 
     return {
         events,
-        statUpdates: finalUpdates,
+        statUpdates: { ...passiveUpdates, ...aiUpdates },
         tokenUsage
     };
 
   } catch (error) {
     console.error("Sim Error:", error);
-    // En cas d'erreur API, on utilise le fallback pour ne pas casser l'immersion
     return {
-      events: [generateFallbackEvent(playerActions)],
+      events: generateFallbackLogic(playerActions, countries),
       statUpdates: passiveUpdates,
       tokenUsage: 0
     };

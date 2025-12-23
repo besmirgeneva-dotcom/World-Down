@@ -13,6 +13,7 @@ import { Country, GameState, StatType, GameEvent, Alliance } from './types';
 import { simulateTurn } from './services/geminiService';
 import { auth } from './services/firebase';
 import { getUserSaves, saveGameToFirestore, deleteSaveFromFirestore, GameSaveData } from './services/saveService';
+import { trackGameStats } from './services/statsService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { Globe, Play, Loader2, Swords, History, Users, Settings, Eye, Cpu, AlertCircle } from 'lucide-react';
 
@@ -219,14 +220,15 @@ export default function App() {
 
     // BLOCAGE: Au moins 1 action requise
     if (playerActions.length === 0) {
-        // On pourrait ajouter un toast/notification ici
-        // Pour l'instant, le bouton est visuellement désactivé, 
-        // mais si l'utilisateur force, on ne fait rien.
         return;
     }
 
     setGameState(prev => ({ ...prev, isSimulating: true }));
     
+    // TELEMETRIE: Envoi des actions en background (fire and forget)
+    // Cela permettra d'enrichir le moteur narratif plus tard
+    trackGameStats(playerActions).catch(console.error);
+
     try {
       const result = await simulateTurn(
           gameState.turn, 
