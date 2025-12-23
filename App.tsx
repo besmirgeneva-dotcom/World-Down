@@ -80,7 +80,6 @@ export default function App() {
        setGameState(prev => ({ ...prev, countries: [...prev.countries, country!] }));
     }
 
-    // Sélection automatique de l'empire (Propriétaire)
     const effectiveOwnerId = country?.ownerId || id;
     const effectiveOwner = gameState.countries.find(c => c.name === effectiveOwnerId) || country;
 
@@ -132,39 +131,39 @@ export default function App() {
   const selectedCountry = gameState.countries.find(c => c.name === gameState.selectedCountryId);
 
   return (
-    <div className="flex flex-col h-screen w-full bg-white text-slate-900 overflow-hidden font-sans">
+    <div className="flex flex-col h-screen w-full bg-white text-slate-900 overflow-hidden font-sans animate-fadeIn">
       {pendingEvents.length > 0 && <EventCard event={pendingEvents[0]} onNext={() => setPendingEvents(p => p.slice(1))} isLast={pendingEvents.length === 1} />}
       <EventLog events={gameState.events} isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
       {isCommandMode && <CommandBar sources={commandSources} target={commandTarget} action={commandAction} onActionChange={setCommandAction} activeSlot={activeCommandSlot} onSlotClick={setActiveCommandSlot} onExecute={handleExecuteCommand} onCancel={() => setIsCommandMode(false)} />}
       
-      <header className="h-24 border-b border-slate-100 bg-white/95 flex items-center justify-between px-12 backdrop-blur-md z-10 relative shadow-sm">
-        <div className="flex items-center gap-6">
-          <div className="p-3 bg-slate-900 text-white rounded-2xl shadow-xl">
-            <Globe size={32} className="animate-spin-slow" />
+      <header className="h-20 border-b border-slate-100 bg-white/95 flex items-center justify-between px-8 backdrop-blur-md z-10 relative shadow-sm flex-shrink-0">
+        <div className="flex items-center gap-4">
+          <div className="p-2.5 bg-slate-900 text-white rounded-xl shadow-lg">
+            <Globe size={24} className="animate-spin-slow" />
           </div>
-          <h1 onClick={() => setView('HUB')} className="text-4xl font-tech font-bold text-slate-900 tracking-tighter cursor-pointer hover:text-blue-600 transition-colors uppercase">
+          <h1 onClick={() => setView('HUB')} className="text-2xl md:text-3xl font-tech font-bold text-slate-900 tracking-tighter cursor-pointer hover:text-blue-600 transition-colors uppercase">
             WORLD<span className="text-blue-600">DOWN</span>
           </h1>
         </div>
-        <div className="flex items-center gap-12">
+        <div className="flex items-center gap-8">
             <div className="flex flex-col items-end">
-                <span className="text-[11px] text-slate-400 uppercase font-black tracking-widest">Temps Mondial</span>
-                <span className="font-tech text-blue-600 font-bold text-3xl">TOUR {gameState.turn}</span>
+                <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest">Temps Mondial</span>
+                <span className="font-tech text-blue-600 font-bold text-2xl">TOUR {gameState.turn}</span>
             </div>
-            <button onClick={handleNextTurn} disabled={gameState.isSimulating} className="flex items-center gap-4 px-10 py-5 bg-blue-600 text-white font-tech font-bold uppercase rounded-3xl shadow-2xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">
-                {gameState.isSimulating ? <Loader2 className="animate-spin" size={28} /> : <Play fill="currentColor" size={24} />}
+            <button onClick={handleNextTurn} disabled={gameState.isSimulating} className="flex items-center gap-3 px-8 py-3.5 bg-blue-600 text-white font-tech font-bold uppercase rounded-2xl shadow-xl shadow-blue-50 hover:bg-blue-700 transition-all active:scale-95 text-sm">
+                {gameState.isSimulating ? <Loader2 className="animate-spin" size={20} /> : <Play fill="currentColor" size={16} />}
                 {gameState.isSimulating ? 'Calcul...' : 'TOUR SUIVANT'}
             </button>
         </div>
       </header>
 
       <main className="flex-1 flex overflow-hidden relative bg-slate-50">
-        <div className="absolute bottom-10 left-10 z-30 flex items-end gap-5">
-            <button onClick={() => setIsHistoryOpen(true)} className="bg-white text-slate-900 border border-slate-100 p-5 rounded-[2rem] shadow-2xl hover:bg-slate-50 transition-all group flex items-center gap-4">
-                <History size={32} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-xs uppercase tracking-widest whitespace-nowrap">Historique</span>
+        <div className="absolute bottom-6 left-6 z-30 flex items-end gap-4">
+            <button onClick={() => setIsHistoryOpen(true)} className="bg-white text-slate-900 border border-slate-100 p-4 rounded-3xl shadow-2xl hover:bg-slate-50 transition-all group flex items-center gap-3">
+                <History size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">Historique</span>
             </button>
-            <button onClick={() => setIsCommandMode(true)} className="bg-slate-900 text-white p-5 rounded-[2.5rem] shadow-2xl hover:bg-black transition-all group flex items-center gap-4">
-                <Swords size={32} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-xs uppercase tracking-widest whitespace-nowrap">Actions</span>
+            <button onClick={() => setIsCommandMode(true)} className="bg-slate-900 text-white p-4 rounded-[2rem] shadow-2xl hover:bg-black transition-all group flex items-center gap-3">
+                <Swords size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">Actions</span>
             </button>
         </div>
 
@@ -172,8 +171,8 @@ export default function App() {
             <Map countries={gameState.countries} alliances={gameState.alliances} selectedCountryId={gameState.selectedCountryId} onSelectCountry={handleCountrySelect} commandSources={commandSources} commandTarget={commandTarget} viewMode={mapViewMode} />
         </div>
 
-        <div className={`absolute top-10 bottom-10 right-10 w-[450px] transition-transform duration-700 ease-out z-20 ${gameState.selectedCountryId && !isCommandMode ? 'translate-x-0' : 'translate-x-[120%]'}`}>
-             <CountryPanel country={selectedCountry} allCountries={gameState.countries} onStatChange={() => {}} onToggleCapability={() => {}} onOpenCommand={() => setIsCommandMode(true)} onClose={() => setGameState(prev => ({ ...prev, selectedCountryId: null }))} className="h-full rounded-[3rem] border border-slate-100 shadow-[0_40px_80px_rgba(0,0,0,0.08)]" />
+        <div className={`absolute top-6 bottom-6 right-6 w-[380px] transition-transform duration-700 ease-out z-20 ${gameState.selectedCountryId && !isCommandMode ? 'translate-x-0' : 'translate-x-[120%]'}`}>
+             <CountryPanel country={selectedCountry} allCountries={gameState.countries} onStatChange={() => {}} onToggleCapability={() => {}} onOpenCommand={() => setIsCommandMode(true)} onClose={() => setGameState(prev => ({ ...prev, selectedCountryId: null }))} className="h-full rounded-[2rem] border border-slate-100 shadow-[0_30px_60px_rgba(0,0,0,0.06)]" />
         </div>
       </main>
     </div>
