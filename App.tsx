@@ -10,6 +10,8 @@ import Hub from './components/Hub';
 import LoginModal from './components/LoginModal';
 import { Country, GameState, StatType, GameEvent, Alliance } from './types';
 import { simulateTurn } from './services/geminiService';
+import { auth } from './services/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { Globe, Play, Loader2, Swords, History, Users } from 'lucide-react';
 
 const INITIAL_ALLIANCES: Alliance[] = [
@@ -37,6 +39,7 @@ export default function App() {
   const [view, setView] = useState<ViewMode>('HOME');
   const [user, setUser] = useState<{ name: string; email: string } | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [saves, setSaves] = useState([
     { id: '1', name: 'Hégémonie Américaine', turn: 42, date: 'Il y a 2h', status: 'Stable' },
     { id: '2', name: 'Empire du Soleil', turn: 15, date: 'Hier', status: 'En Guerre' }
@@ -62,15 +65,52 @@ export default function App() {
   const [pendingEvents, setPendingEvents] = useState<GameEvent[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
+  // Monitor Firebase Auth State
+  useEffect(() => {
+    if (!auth) {
+      // Si auth n'est pas initialisé (mauvaise config), on arrête le loading mais on reste déconnecté
+      setIsAuthLoading(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Commandant',
+          email: firebaseUser.email || ''
+        });
+        if (view === 'HOME') setView('HUB');
+      } else {
+        setUser(null);
+        setView('HOME');
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [view]);
+
   useEffect(() => {
     if (['Alliance', 'Rejoindre Alliance', 'Quitter Alliance'].includes(commandAction)) setMapViewMode('alliances');
     else setMapViewMode('political');
   }, [commandAction]);
 
   const handleLogin = (userData: { name: string; email: string }) => {
+    // This is primarily called by the modal for immediate UI feedback, 
+    // but onAuthStateChanged will handle the actual source of truth
     setUser(userData);
     setIsLoginModalOpen(false);
     setView('HUB');
+  };
+
+  const handleLogout = async () => {
+    if (!auth) return;
+    try {
+      await signOut(auth);
+      // view change handled by onAuthStateChanged
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
   };
 
   const handleCountrySelect = (id: string) => {
@@ -125,20 +165,28 @@ export default function App() {
     } catch (e) { setGameState(prev => ({ ...prev, isSimulating: false })); }
   };
 
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-white">
+        <Loader2 className="animate-spin text-slate-300" size={40} />
+      </div>
+    );
+  }
+
   if (view === 'HOME') return <><Home onStart={() => setIsLoginModalOpen(true)} /><LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} /></>;
-  if (view === 'HUB' && user) return <Hub user={user} saves={saves} onNewGame={() => setView('GAME')} onLoadGame={() => setView('GAME')} onDeleteSave={(id) => setSaves(s => s.filter(x => x.id !== id))} onLogout={() => setView('HOME')} />;
+  if (view === 'HUB' && user) return <Hub user={user} saves={saves} onNewGame={() => setView('GAME')} onLoadGame={() => setView('GAME')} onDeleteSave={(id) => setSaves(s => s.filter(x => x.id !== id))} onLogout={handleLogout} />;
 
   const selectedCountry = gameState.countries.find(c => c.name === gameState.selectedCountryId);
 
   return (
-    <div className="flex flex-col h-screen w-full bg-white text-slate-900 overflow-hidden font-sans animate-fadeIn">
+    <div className="flex flex-col h-screen max-h-screen w-full bg-white text-slate-900 overflow-hidden font-sans animate-fadeIn">
       {pendingEvents.length > 0 && <EventCard event={pendingEvents[0]} onNext={() => setPendingEvents(p => p.slice(1))} isLast={pendingEvents.length === 1} />}
       <EventLog events={gameState.events} isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
       {isCommandMode && <CommandBar sources={commandSources} target={commandTarget} action={commandAction} onActionChange={setCommandAction} activeSlot={activeCommandSlot} onSlotClick={setActiveCommandSlot} onExecute={handleExecuteCommand} onCancel={() => setIsCommandMode(false)} />}
       
       <header className="h-20 border-b border-slate-100 bg-white/95 flex items-center justify-between px-8 backdrop-blur-md z-10 relative shadow-sm flex-shrink-0">
         <div className="flex items-center gap-4">
-          <div className="p-2.5 bg-slate-900 text-white rounded-xl shadow-lg">
+          <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg">
             <Globe size={24} className="animate-spin-slow" />
           </div>
           <h1 onClick={() => setView('HUB')} className="text-2xl md:text-3xl font-tech font-bold text-slate-900 tracking-tighter cursor-pointer hover:text-blue-600 transition-colors uppercase">
@@ -150,8 +198,8 @@ export default function App() {
                 <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest">Temps Mondial</span>
                 <span className="font-tech text-blue-600 font-bold text-2xl">TOUR {gameState.turn}</span>
             </div>
-            <button onClick={handleNextTurn} disabled={gameState.isSimulating} className="flex items-center gap-3 px-8 py-3.5 bg-blue-600 text-white font-tech font-bold uppercase rounded-2xl shadow-xl shadow-blue-50 hover:bg-blue-700 transition-all active:scale-95 text-sm">
-                {gameState.isSimulating ? <Loader2 className="animate-spin" size={20} /> : <Play fill="currentColor" size={16} />}
+            <button onClick={handleNextTurn} disabled={gameState.isSimulating} className="flex items-center gap-3 px-6 py-3 bg-blue-600 text-white font-tech font-bold uppercase rounded-2xl shadow-xl shadow-blue-50 hover:bg-blue-700 transition-all active:scale-95 text-xs">
+                {gameState.isSimulating ? <Loader2 className="animate-spin" size={18} /> : <Play fill="currentColor" size={16} />}
                 {gameState.isSimulating ? 'Calcul...' : 'TOUR SUIVANT'}
             </button>
         </div>
@@ -159,19 +207,19 @@ export default function App() {
 
       <main className="flex-1 flex overflow-hidden relative bg-slate-50">
         <div className="absolute bottom-6 left-6 z-30 flex items-end gap-4">
-            <button onClick={() => setIsHistoryOpen(true)} className="bg-white text-slate-900 border border-slate-100 p-4 rounded-3xl shadow-2xl hover:bg-slate-50 transition-all group flex items-center gap-3">
+            <button onClick={() => setIsHistoryOpen(true)} className="bg-white text-slate-900 border border-slate-100 p-3 rounded-2xl shadow-2xl hover:bg-slate-50 transition-all group flex items-center gap-3">
                 <History size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">Historique</span>
             </button>
-            <button onClick={() => setIsCommandMode(true)} className="bg-slate-900 text-white p-4 rounded-[2rem] shadow-2xl hover:bg-black transition-all group flex items-center gap-3">
+            <button onClick={() => setIsCommandMode(true)} className="bg-slate-900 text-white p-3 rounded-2xl shadow-2xl hover:bg-black transition-all group flex items-center gap-3">
                 <Swords size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">Actions</span>
             </button>
         </div>
 
-        <div className="flex-1 flex items-center justify-center bg-white">
+        <div className="flex-1 flex items-center justify-center bg-white h-full relative">
             <Map countries={gameState.countries} alliances={gameState.alliances} selectedCountryId={gameState.selectedCountryId} onSelectCountry={handleCountrySelect} commandSources={commandSources} commandTarget={commandTarget} viewMode={mapViewMode} />
         </div>
 
-        <div className={`absolute top-6 bottom-6 right-6 w-[380px] transition-transform duration-700 ease-out z-20 ${gameState.selectedCountryId && !isCommandMode ? 'translate-x-0' : 'translate-x-[120%]'}`}>
+        <div className={`absolute top-6 bottom-6 right-6 w-[360px] transition-transform duration-700 ease-out z-20 ${gameState.selectedCountryId && !isCommandMode ? 'translate-x-0' : 'translate-x-[130%]'}`}>
              <CountryPanel country={selectedCountry} allCountries={gameState.countries} onStatChange={() => {}} onToggleCapability={() => {}} onOpenCommand={() => setIsCommandMode(true)} onClose={() => setGameState(prev => ({ ...prev, selectedCountryId: null }))} className="h-full rounded-[2rem] border border-slate-100 shadow-[0_30px_60px_rgba(0,0,0,0.06)]" />
         </div>
       </main>
