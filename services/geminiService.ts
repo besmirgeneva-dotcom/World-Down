@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { Country, GameEvent } from "../types";
 
 // Helper robuste pour récupérer la clé API
@@ -25,27 +25,30 @@ const getAI = () => {
 };
 
 // --- SMART CONTEXT FILTERING ---
-// Filtre les pays pour n'envoyer que ceux qui sont pertinents pour la simulation
-// Évite d'envoyer les pays "passifs" sur lesquels le joueur a juste cliqué.
 const getRelevantCountries = (countries: Country[], playerActions: string[]): Country[] => {
-  const MAJOR_POWERS = ["United States", "China", "Russia", "Germany", "France", "United Kingdom", "India", "Japan", "Brazil", "Israel", "Iran", "North Korea"];
+  // Liste restreinte aux vrais acteurs majeurs pour économiser les tokens
+  const MAJOR_POWERS = [
+    "United States", "China", "Russia", "Germany", "France", 
+    "United Kingdom", "India", "Japan", "Brazil", "Israel", "Iran", "North Korea"
+  ];
   
-  // Concaténer toutes les actions pour recherche textuelle simple
   const actionsText = playerActions.join(" ").toLowerCase();
 
   return countries.filter(c => {
-    // 1. Toujours inclure les puissances majeures et nucléaires
+    // 1. Toujours inclure les majeurs (filtrage par nom partiel pour sécurité)
     if (MAJOR_POWERS.some(p => c.name.includes(p))) return true;
+    
+    // 2. Pays impliqués dans des actions récentes
+    if (actionsText.includes(c.name.toLowerCase())) return true;
+    
+    // 3. Pays avec armes nucléaires (toujours pertinents)
     if (c.stats.hasNuclear) return true;
 
-    // 2. Inclure les pays mentionnés explicitement dans les actions du joueur (Cible ou Source)
-    if (actionsText.includes(c.name.toLowerCase())) return true;
+    // 4. Pays en guerre ou détruits (pour suivi)
+    if (c.isDestroyed || c.ownerId !== c.name) return true;
 
-    // 3. Inclure les pays avec une forte armée (menaces potentielles)
-    if (c.stats.military > 70) return true;
-
-    // 4. Inclure les pays appartenant à une alliance (acteurs géopolitiques)
-    if (c.allianceId) return true;
+    // 5. Chef d'alliance
+    if (c.allianceId && !c.allianceId.includes(c.name)) return true; // Simplification
 
     return false;
   });
@@ -53,23 +56,25 @@ const getRelevantCountries = (countries: Country[], playerActions: string[]): Co
 
 const serializeWorldState = (countries: Country[]) => {
   return countries.map(c => {
-    // Format compact: ID|Eco|Mil|Pop|Flags
-    const flags = [];
-    if (c.stats.hasNuclear) flags.push('N');
-    if (c.stats.hasSpaceProgram) flags.push('S');
-    if (c.isDestroyed) flags.push('DEAD');
+    // Format ultra-court: Nom|E|M|P|Flags
+    // Ex: France|80|50|20|ND
+    let flags = "";
+    if (c.stats.hasNuclear) flags += 'N';
+    if (c.isDestroyed) flags += 'D';
+    if (c.ownerId && c.ownerId !== c.name) flags += `(Own:${c.ownerId})`; // Indique annexion
     
-    const e = Math.round(c.stats.economy);
-    const m = Math.round(c.stats.military);
-    const p = Math.round(c.stats.population);
+    // Arrondi strict
+    const e = Math.floor(c.stats.economy);
+    const m = Math.floor(c.stats.military);
+    const p = Math.floor(c.stats.population);
     
-    // On garde le nom complet pour l'IA, c'est plus sûr pour la correspondance
-    return `${c.name}|${e}|${m}|${p}|${flags.join('_')}`;
+    return `${c.name}|${e}|${m}|${p}|${flags}`;
   }).join('\n');
 };
 
 const serializeEvents = (events: GameEvent[]) => {
-  return events.slice(-3).map(e => `T${e.turn}:${e.description.substring(0, 50)}...`).join('|');
+  // On ne garde que le tout dernier événement pour le contexte immédiat
+  return events.slice(-1).map(e => `T${e.turn}:${e.description.substring(0, 30)}`).join('|');
 };
 
 export const simulateTurn = async (
@@ -87,118 +92,112 @@ export const simulateTurn = async (
   }
 
   const shouldUpdateSummary = currentTurn % 10 === 0;
-
-  // 1. FILTRAGE INTELLIGENT (Réduction Input)
+  
+  // Filtrage drastique
   const relevantCountries = getRelevantCountries(countries, playerActions);
   
-  const worldStateCompact = serializeWorldState(relevantCountries);
-  const recentHistoryCompact = serializeEvents(recentEvents);
-  const actionsCompact = playerActions.length > 0 ? playerActions.join(". ") : "RAS";
+  const worldState = serializeWorldState(relevantCountries);
+  const history = serializeEvents(recentEvents);
+  const actions = playerActions.length > 0 ? playerActions.join(". ") : "RAS";
 
-  // Prompt
-  // Note: On demande un format de sortie compressé pour 'updates'
+  // PROMPT MINIFIÉ (Token saving + Force French)
   const prompt = `
-    ROLE: Simu Géopolitique "World Down".
-    DATA: Country|Eco|Mil|Pop|Flags.
-    
-    ETAT (T${currentTurn}):
-    ${worldStateCompact}
-    
-    HISTOIRE: ${globalSummary || "Début."}
-    RECENT: ${recentHistoryCompact}
-    ORDRES: ${actionsCompact}
+CTX:Jeu Stratégie. LANGUE:FRANÇAIS(OBLIGATOIRE). T:${currentTurn}.
+DATA(Nom|Eco|Mil|Pop|Flags):
+${worldState}
+HIST:${globalSummary}|${history}
+ACT:${actions}
 
-    REGLES:
-    1. JOUEUR: "Attaque"=Guerre. "Soutien"=Boost. "Alliance"=Amitié.
-    2. IA: Forts (Mil>80) attaquent Faibles si pas d'alliance.
-    3. NUCLÉAIRE: Flag 'N' = Dissuasion.
-    
-    OUTPUT FORMAT:
-    - events: Liste de phrases.
-    - updates: Liste de Strings "CountryName:EcoDelta:MilDelta:PopDelta" (Ex: "France:-5:2:0").
-    ${shouldUpdateSummary ? "- newSummary: Texte résumé global." : ""}
-  `;
+REGLES:
+1.Si act joueur, réagir. Sinon, évolution monde subtile.
+2.Forts(Mil>80) dominent.
+3.N=Nuke(Dissuasion).
 
-  // 2. SCHEMA COMPRESSÉ (Réduction Output)
-  // Au lieu d'objets complexes, on demande un tableau de strings simples
-  const schemaProperties: any = {
-    events: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "Max 3 phrases narratives."
-    },
-    updates: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING }, 
-      description: "Format: 'CountryName:Eco:Mil:Pop' (ex: 'USA:5:-2:1')"
-    }
-  };
-
-  if (shouldUpdateSummary) {
-    schemaProperties.newSummary = {
-      type: Type.STRING,
-      description: "Résumé historique compressé."
-    };
-  }
+FORMAT REPONSE (TEXTE BRUT STRICT):
+===E===
+- (1 phrase événement majeur en français)
+- (1 phrase conséquence en français, optionnel)
+===U===
+NomPays:Eco:Mil:Pop (Ex: France:80:55:20)
+${shouldUpdateSummary ? "===S===\n(Résumé global court 2 phrases)" : ""}
+`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: schemaProperties
-        }
-      }
     });
 
-    const text = response.text;
+    const text = response.text || "";
     const tokenUsage = response.usageMetadata?.totalTokenCount || 0;
 
-    if (!text) return { events: ["Erreur de simulation IA."], statUpdates: {}, tokenUsage: 0 };
-
-    const rawData = JSON.parse(text);
-
-    // 3. PARSING DECOMPRESSION
-    // On transforme les strings compactes de l'IA en objets utilisables par le Frontend
+    // --- PARSING MANUEL ---
+    const events: string[] = [];
     const statUpdates: Record<string, Partial<Country['stats']>> = {};
-    
-    if (rawData.updates && Array.isArray(rawData.updates)) {
-        rawData.updates.forEach((updateStr: string) => {
-            // Format attendu: "Name:Eco:Mil:Pop"
-            // On utilise le dernier ':' comme séparateur pour éviter les bugs si le nom contient ':' (rare mais possible)
-            // Mais plus simple: split par ':' et on prend les 3 derniers comme chiffres.
-            
-            const parts = updateStr.split(':');
-            if (parts.length >= 4) {
-                const pop = parseInt(parts.pop() || "0");
-                const mil = parseInt(parts.pop() || "0");
-                const eco = parseInt(parts.pop() || "0");
-                const name = parts.join(':').trim(); // Le reste est le nom
+    let newSummary = undefined;
 
-                if (name) {
-                    statUpdates[name] = {
-                        economy: isNaN(eco) ? 0 : eco,
-                        military: isNaN(mil) ? 0 : mil,
-                        population: isNaN(pop) ? 0 : pop
-                    };
+    const sections = text.split('===');
+    
+    // Recherche des sections par contenu approximatif si l'IA foire un peu le formatage
+    let eventContent = "";
+    let updateContent = "";
+    let summaryContent = "";
+
+    // Logique de parsing plus souple
+    for (let i = 0; i < sections.length; i++) {
+        const s = sections[i].trim();
+        if (s.startsWith('E')) eventContent = sections[i+1];
+        if (s.startsWith('U')) updateContent = sections[i+1];
+        if (s.startsWith('S')) summaryContent = sections[i+1];
+    }
+
+    // Fallback si format strict respecté
+    if (!eventContent) eventContent = text.split('===E===')[1]?.split('===U===')[0] || "";
+    if (!updateContent) updateContent = text.split('===U===')[1]?.split('===S===')[0] || "";
+
+    // Parse Events
+    if (eventContent) {
+        eventContent.split('\n').forEach(line => {
+            const clean = line.trim().replace(/^-\s*/, '').replace(/^\*\s*/, '');
+            if (clean && clean.length > 3) events.push(clean);
+        });
+    }
+
+    // Parse Updates
+    if (updateContent) {
+        updateContent.split('\n').forEach(line => {
+            // Format attendu: Name:E:M:P
+            const parts = line.trim().split(':');
+            if (parts.length >= 4) {
+                const p = parseInt(parts.pop() || "0");
+                const m = parseInt(parts.pop() || "0");
+                const e = parseInt(parts.pop() || "0");
+                const name = parts.join(':').trim();
+                
+                // Vérification basique anti-hallucination
+                if (name && !isNaN(e) && !isNaN(m)) {
+                    statUpdates[name] = { economy: e, military: m, population: p };
                 }
             }
         });
     }
 
+    // Parse Summary
+    if (shouldUpdateSummary && summaryContent) {
+        newSummary = summaryContent.trim();
+    }
+
     return {
-        events: rawData.events || [],
+        events: events.length ? events : ["Le monde retient son souffle."],
         statUpdates,
         tokenUsage,
-        newSummary: rawData.newSummary
+        newSummary
     };
+
   } catch (error) {
     console.error("Gemini simulation error:", error);
     return {
-      events: ["La communication avec le simulateur global a échoué."],
+      events: ["Erreur de communication comlink."],
       statUpdates: {},
       tokenUsage: 0
     };
