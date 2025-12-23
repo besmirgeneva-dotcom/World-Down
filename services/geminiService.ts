@@ -24,57 +24,79 @@ const getAI = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+// --- OPTIMIZATION: SHORT CODES ---
+// Dictionnaire pour compresser les noms longs en 1 token
+const COUNTRY_ALIASES: Record<string, string> = {
+  "United States of America": "USA",
+  "United Kingdom": "UK",
+  "Russia": "RUS",
+  "China": "CHN",
+  "Germany": "DEU",
+  "France": "FRA",
+  "India": "IND",
+  "Japan": "JPN",
+  "Brazil": "BRA",
+  "Israel": "ISR",
+  "Iran": "IRN",
+  "North Korea": "PRK",
+  "South Korea": "KOR",
+  "Taiwan": "TWN",
+  "Canada": "CAN",
+  "Australia": "AUS"
+};
+
+// Fonction inverse pour retrouver le nom complet
+const getFullName = (code: string): string | undefined => {
+  const entry = Object.entries(COUNTRY_ALIASES).find(([name, alias]) => alias === code);
+  return entry ? entry[0] : undefined;
+};
+
+// Obtient le code court ou utilise les 3 premières lettres
+const getShortCode = (name: string): string => {
+  if (COUNTRY_ALIASES[name]) return COUNTRY_ALIASES[name];
+  return name.substring(0, 3).toUpperCase();
+};
+
 // --- SMART CONTEXT FILTERING ---
 const getRelevantCountries = (countries: Country[], playerActions: string[]): Country[] => {
-  // Liste restreinte aux vrais acteurs majeurs pour économiser les tokens
-  const MAJOR_POWERS = [
-    "United States", "China", "Russia", "Germany", "France", 
-    "United Kingdom", "India", "Japan", "Brazil", "Israel", "Iran", "North Korea"
-  ];
-  
+  const MAJOR_POWERS = ["USA", "CHN", "RUS", "DEU", "FRA", "UK", "IND"];
   const actionsText = playerActions.join(" ").toLowerCase();
 
   return countries.filter(c => {
-    // 1. Toujours inclure les majeurs (filtrage par nom partiel pour sécurité)
-    if (MAJOR_POWERS.some(p => c.name.includes(p))) return true;
-    
-    // 2. Pays impliqués dans des actions récentes
+    const code = getShortCode(c.name);
+    // 1. Majeurs (par code ou nom partiel)
+    if (MAJOR_POWERS.includes(code)) return true;
+    // 2. Interaction active
     if (actionsText.includes(c.name.toLowerCase())) return true;
-    
-    // 3. Pays avec armes nucléaires (toujours pertinents)
+    // 3. Nucléaire
     if (c.stats.hasNuclear) return true;
-
-    // 4. Pays en guerre ou détruits (pour suivi)
-    if (c.isDestroyed || c.ownerId !== c.name) return true;
-
-    // 5. Chef d'alliance
-    if (c.allianceId && !c.allianceId.includes(c.name)) return true; // Simplification
-
+    // 4. Guerre/Détruit
+    if (c.isDestroyed || (c.ownerId && c.ownerId !== c.name)) return true;
     return false;
   });
 };
 
 const serializeWorldState = (countries: Country[]) => {
   return countries.map(c => {
-    // Format ultra-court: Nom|E|M|P|Flags
-    // Ex: France|80|50|20|ND
+    // Format: COD|E|M|P|F
+    // Ex: FRA|80|50|20|N
     let flags = "";
     if (c.stats.hasNuclear) flags += 'N';
     if (c.isDestroyed) flags += 'D';
-    if (c.ownerId && c.ownerId !== c.name) flags += `(Own:${c.ownerId})`; // Indique annexion
+    if (c.ownerId && c.ownerId !== c.name) flags += `>${getShortCode(c.ownerId)}`; // >USA indique annexé par USA
     
-    // Arrondi strict
+    // Arrondi pour supprimer les décimales inutiles
     const e = Math.floor(c.stats.economy);
     const m = Math.floor(c.stats.military);
     const p = Math.floor(c.stats.population);
     
-    return `${c.name}|${e}|${m}|${p}|${flags}`;
-  }).join('\n');
+    return `${getShortCode(c.name)}|${e}|${m}|${p}|${flags}`;
+  }).join(' '); // Espace au lieu de newline économise un peu
 };
 
 const serializeEvents = (events: GameEvent[]) => {
-  // On ne garde que le tout dernier événement pour le contexte immédiat
-  return events.slice(-1).map(e => `T${e.turn}:${e.description.substring(0, 30)}`).join('|');
+  // Uniquement le dernier event, tronqué
+  return events.slice(-1).map(e => `T${e.turn}:${e.description.substring(0, 25)}`).join('|');
 };
 
 export const simulateTurn = async (
@@ -88,116 +110,104 @@ export const simulateTurn = async (
   try {
     ai = getAI();
   } catch (e) {
-    return { events: ["ERREUR SYSTÈME : Clé API manquante."], statUpdates: {}, tokenUsage: 0 };
+    return { events: ["ERREUR API"], statUpdates: {}, tokenUsage: 0 };
   }
 
   const shouldUpdateSummary = currentTurn % 10 === 0;
   
-  // Filtrage drastique
   const relevantCountries = getRelevantCountries(countries, playerActions);
-  
   const worldState = serializeWorldState(relevantCountries);
   const history = serializeEvents(recentEvents);
-  const actions = playerActions.length > 0 ? playerActions.join(". ") : "RAS";
+  
+  // Si aucune action, on envoie "Wait" pour dire à l'IA de faire un tour calme
+  const actions = playerActions.length > 0 ? playerActions.join(".") : "Wait";
 
-  // PROMPT MINIFIÉ (Token saving + Force French)
+  // PROMPT TELEGRAPHIQUE
+  // Suppression de tous les mots de liaison. Syntaxe Data-only.
   const prompt = `
-CTX:Jeu Stratégie. LANGUE:FRANÇAIS(OBLIGATOIRE). T:${currentTurn}.
-DATA(Nom|Eco|Mil|Pop|Flags):
-${worldState}
+CTX:GeoPol Sim. LANG:FR. T:${currentTurn}.
+STATE(Cod|E|M|P|Flg): ${worldState}
 HIST:${globalSummary}|${history}
 ACT:${actions}
 
-REGLES:
-1.Si act joueur, réagir. Sinon, évolution monde subtile.
-2.Forts(Mil>80) dominent.
-3.N=Nuke(Dissuasion).
+RULES:
+1.React to ACT. If Wait, minimal change.
+2.High Mil(>80) threatens.
+3.Flg: N=Nuke, D=Dead, >COD=OwnedBy.
 
-FORMAT REPONSE (TEXTE BRUT STRICT):
-===E===
-- (1 phrase événement majeur en français)
-- (1 phrase conséquence en français, optionnel)
-===U===
-NomPays:Eco:Mil:Pop (Ex: France:80:55:20)
-${shouldUpdateSummary ? "===S===\n(Résumé global court 2 phrases)" : ""}
+OUT(RAW TXT):
+#E
+- Event FR (max 1)
+#U
+COD:Eco:Mil:Pop (Ex:FRA:80:55:20)
+${shouldUpdateSummary ? "#S\nGlobalSum(FR)" : ""}
 `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-flash-preview', // Flash est moins cher et suffit largement
       contents: prompt,
     });
 
     const text = response.text || "";
     const tokenUsage = response.usageMetadata?.totalTokenCount || 0;
 
-    // --- PARSING MANUEL ---
+    // --- PARSING MANUEL OPTIMISÉ ---
     const events: string[] = [];
     const statUpdates: Record<string, Partial<Country['stats']>> = {};
     let newSummary = undefined;
 
-    const sections = text.split('===');
+    // Découpage par marqueurs courts #E, #U, #S
+    const parts = text.split('#');
     
-    // Recherche des sections par contenu approximatif si l'IA foire un peu le formatage
-    let eventContent = "";
-    let updateContent = "";
-    let summaryContent = "";
+    parts.forEach(part => {
+        const type = part.charAt(0);
+        const content = part.substring(1).trim();
 
-    // Logique de parsing plus souple
-    for (let i = 0; i < sections.length; i++) {
-        const s = sections[i].trim();
-        if (s.startsWith('E')) eventContent = sections[i+1];
-        if (s.startsWith('U')) updateContent = sections[i+1];
-        if (s.startsWith('S')) summaryContent = sections[i+1];
-    }
+        if (type === 'E') {
+            content.split('\n').forEach(line => {
+                const clean = line.replace(/^-\s*/, '').trim();
+                if (clean.length > 3) events.push(clean);
+            });
+        }
+        else if (type === 'U') {
+            content.split('\n').forEach(line => {
+                // Parsing: COD:E:M:P
+                const segs = line.trim().split(':');
+                if (segs.length >= 4) {
+                    const p = parseInt(segs.pop() || "0");
+                    const m = parseInt(segs.pop() || "0");
+                    const e = parseInt(segs.pop() || "0");
+                    const code = segs[0].trim();
+                    
+                    // Traduction Code -> Nom Complet
+                    const fullName = getFullName(code) || (countries.find(c => c.name.startsWith(code))?.name);
 
-    // Fallback si format strict respecté
-    if (!eventContent) eventContent = text.split('===E===')[1]?.split('===U===')[0] || "";
-    if (!updateContent) updateContent = text.split('===U===')[1]?.split('===S===')[0] || "";
-
-    // Parse Events
-    if (eventContent) {
-        eventContent.split('\n').forEach(line => {
-            const clean = line.trim().replace(/^-\s*/, '').replace(/^\*\s*/, '');
-            if (clean && clean.length > 3) events.push(clean);
-        });
-    }
-
-    // Parse Updates
-    if (updateContent) {
-        updateContent.split('\n').forEach(line => {
-            // Format attendu: Name:E:M:P
-            const parts = line.trim().split(':');
-            if (parts.length >= 4) {
-                const p = parseInt(parts.pop() || "0");
-                const m = parseInt(parts.pop() || "0");
-                const e = parseInt(parts.pop() || "0");
-                const name = parts.join(':').trim();
-                
-                // Vérification basique anti-hallucination
-                if (name && !isNaN(e) && !isNaN(m)) {
-                    statUpdates[name] = { economy: e, military: m, population: p };
+                    if (fullName && !isNaN(e)) {
+                        statUpdates[fullName] = { economy: e, military: m, population: p };
+                    }
                 }
-            }
-        });
-    }
+            });
+        }
+        else if (type === 'S' && shouldUpdateSummary) {
+            newSummary = content;
+        }
+    });
 
-    // Parse Summary
-    if (shouldUpdateSummary && summaryContent) {
-        newSummary = summaryContent.trim();
-    }
+    // Fallback events si vide
+    if (events.length === 0) events.push("Calme précaire.");
 
     return {
-        events: events.length ? events : ["Le monde retient son souffle."],
+        events,
         statUpdates,
         tokenUsage,
         newSummary
     };
 
   } catch (error) {
-    console.error("Gemini simulation error:", error);
+    console.error("Sim Error:", error);
     return {
-      events: ["Erreur de communication comlink."],
+      events: ["Com Interrompue."],
       statUpdates: {},
       tokenUsage: 0
     };
