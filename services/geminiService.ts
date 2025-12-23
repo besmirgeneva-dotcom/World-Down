@@ -101,6 +101,26 @@ const serializeEvents = (events: GameEvent[]) => {
   return events.slice(-5).map(e => `T${e.turn}:${e.description.substring(0, 30)}`).join('|');
 };
 
+// --- FALLBACK GENERATOR (ZERO TOKEN) ---
+// Génère un texte crédible si l'IA échoue ou si on veut économiser
+const generateFallbackEvent = (actions: string[]): string => {
+    const combined = actions.join(" ").toLowerCase();
+    
+    if (combined.includes("alliance") || combined.includes("diplomatie")) {
+        return "Des traités historiques redessinent les blocs de pouvoir. Les chancelleries du monde entier analysent ce nouveau rapport de force.";
+    }
+    if (combined.includes("guerre") || combined.includes("attaque") || combined.includes("annexer")) {
+        return "Le bruit des bottes résonne. Les marchés s'effondrent alors que les frontières sont redessinées par la force.";
+    }
+    if (combined.includes("nucléaire") || combined.includes("nuclear")) {
+        return "ALERTE DEFCON: L'horloge de l'apocalypse avance. Le monde retient son souffle face à l'escalade atomique.";
+    }
+    if (combined.includes("économique") || combined.includes("sabotage")) {
+        return "Guerre de l'ombre: Des cyber-attaques et sanctions paralysent les infrastructures clés.";
+    }
+    return "L'ordre mondial est en mutation. Les superpuissances ajustent leurs stratégies face aux récents bouleversements.";
+};
+
 // --- MAIN SIMULATION ---
 
 export const simulateTurn = async (
@@ -110,18 +130,19 @@ export const simulateTurn = async (
   recentEvents: GameEvent[]
 ): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
   
-  // Note: On a supprimé le "Lazy Mode" (Marchés stables) car le jeu impose maintenant au moins une action.
-  // On utilise toujours Gemini pour générer une réponse narrative intéressante.
-
   let ai;
   try {
     ai = getAI();
   } catch (e) {
-    return { events: ["ERREUR API"], statUpdates: {}, tokenUsage: 0 };
+    // Si pas d'API, on utilise le générateur local
+    return { 
+        events: [generateFallbackEvent(playerActions)], 
+        statUpdates: {}, 
+        tokenUsage: 0 
+    };
   }
 
   // STRATEGIE 1: HYBRID ENGINE
-  // On n'envoie à l'IA que les pays pertinents pour économiser le contexte
   const relevantCountries = getRelevantCountries(countries, playerActions);
   
   // Les pays NON pertinents sont calculés localement
@@ -134,27 +155,35 @@ export const simulateTurn = async (
 
   const worldState = serializeWorldState(relevantCountries);
   const history = serializeEvents(recentEvents);
-  // playerActions ne devrait jamais être vide ici, mais safety check
-  const actions = playerActions.length > 0 ? playerActions.join(".") : "Wait";
+  const actions = playerActions.length > 0 ? playerActions.join(". ") : "Wait";
 
-  // STRATEGIE 3: SYSTEM INSTRUCTION (Caching Ready)
-  // Les règles statiques vont dans le systemInstruction
+  // STRATEGIE 3: SYSTEM INSTRUCTION (NARRATIVE MODE)
+  // On demande un style journalistique détaillé
   const systemInstruction = `
-ROLE:Game Engine. LANG:FR.
-RULES:
-1.React to ACT based on HIST.
-2.If War/Attack -> High Impact.
-3.Eco/Mil/Pop 0-100.
-4.Flg: N=Nuke, D=Dead, >COD=Owned.
+ROLE: Geopolitical News Analyst. LANG: FR.
+CONTEXT: A strategy game 'World Down'.
+INPUT: 
+- STATE (Country stats)
+- HIST (Past events)
+- ACT (Player actions this turn)
+
+INSTRUCTIONS:
+1. Analyze the impact of ACT on the world.
+2. If ACT is 'Alliance', describe the geopolitical shift and reactions of rivals.
+3. If ACT is 'War', describe the chaos.
+4. Output 1-2 rich, dramatic news headlines. NOT SHORT. DETAILED.
+5. Output updated stats for involved countries.
+
 FORMAT OUT:
 #E
-- Event (Short)
+[Rich Narrative Event 1]
+[Rich Narrative Event 2 (Optional)]
 #U
 COD:Eco:Mil:Pop
 `;
 
   const prompt = `
-CTX:T:${currentTurn}
+CTX:Turn ${currentTurn}
 STATE:${worldState}
 HIST:${history}
 ACT:${actions}
@@ -166,7 +195,8 @@ ACT:${actions}
       contents: prompt,
       config: {
         systemInstruction: systemInstruction,
-        maxOutputTokens: 200, // Limite stricte pour forcer la concision
+        maxOutputTokens: 600, // Augmenté pour permettre du détail
+        temperature: 0.8, // Plus créatif
       }
     });
 
@@ -184,8 +214,8 @@ ACT:${actions}
 
         if (type === 'E') {
             content.split('\n').forEach(line => {
-                const clean = line.replace(/^-\s*/, '').trim();
-                if (clean.length > 3) events.push(clean);
+                const clean = line.replace(/^-\s*/, '').replace(/^\[|\]$/g, '').trim();
+                if (clean.length > 10) events.push(clean);
             });
         }
         else if (type === 'U') {
@@ -206,9 +236,11 @@ ACT:${actions}
         }
     });
 
-    if (events.length === 0) events.push("Tensions géopolitiques.");
+    // Si l'IA n'a rien généré de pertinent, utiliser le fallback local intelligent
+    if (events.length === 0) {
+        events.push(generateFallbackEvent(playerActions));
+    }
 
-    // MERGE: On combine les mises à jour IA (prioritaires) avec les mises à jour passives locales
     const finalUpdates = { ...passiveUpdates, ...aiUpdates };
 
     return {
@@ -219,9 +251,10 @@ ACT:${actions}
 
   } catch (error) {
     console.error("Sim Error:", error);
+    // En cas d'erreur API, on utilise le fallback pour ne pas casser l'immersion
     return {
-      events: ["Com Interrompue."],
-      statUpdates: {},
+      events: [generateFallbackEvent(playerActions)],
+      statUpdates: passiveUpdates,
       tokenUsage: 0
     };
   }
