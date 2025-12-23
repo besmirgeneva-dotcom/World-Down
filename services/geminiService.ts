@@ -24,11 +24,36 @@ const getAI = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+// COMPRESSION DES DONNÉES (Point 1: Réduire la verbosité)
+const serializeWorldState = (countries: Country[]) => {
+  return countries.map(c => {
+    // Format compact: ID|Eco|Mil|Pop|Flags
+    // Ex: US|90|95|40|N_S
+    const flags = [];
+    if (c.stats.hasNuclear) flags.push('N');
+    if (c.stats.hasSpaceProgram) flags.push('S');
+    if (c.isDestroyed) flags.push('DEAD');
+    
+    // On arrondit pour économiser des caractères
+    const e = Math.round(c.stats.economy);
+    const m = Math.round(c.stats.military);
+    const p = Math.round(c.stats.population);
+    
+    return `${c.name}|${e}|${m}|${p}|${flags.join('_')}`;
+  }).join('\n');
+};
+
+const serializeEvents = (events: GameEvent[]) => {
+  // On ne garde que les 3 derniers, format très court
+  // T5: Guerre en Europe
+  return events.slice(-3).map(e => `T${e.turn}:${e.description.substring(0, 50)}...`).join('|');
+};
+
 export const simulateTurn = async (
   currentTurn: number,
   countries: Country[],
   playerActions: string[],
-  recentEvents: GameEvent[] // Added history for context
+  recentEvents: GameEvent[]
 ): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
   let ai;
   try {
@@ -37,45 +62,30 @@ export const simulateTurn = async (
     return { events: ["ERREUR SYSTÈME : Clé API manquante."], statUpdates: {}, tokenUsage: 0 };
   }
 
-  // Filter mainly active countries or just send name + stats to reduce context size
-  const worldState = countries.map(c => ({
-    name: c.name,
-    stats: c.stats
-  }));
+  // Préparation des données compressées
+  const worldStateCompact = serializeWorldState(countries);
+  const historyCompact = serializeEvents(recentEvents);
+  const actionsCompact = playerActions.length > 0 ? playerActions.join(". ") : "RAS";
 
-  const lastFiveEvents = recentEvents.slice(-5).map(e => `Tour ${e.turn}: ${e.description}`);
-
+  // Prompt Télégraphique (Point 3: Optimisation System Prompt)
   const prompt = `
-    Vous êtes le moteur de simulation (Game Master) ultra-réaliste pour "World Down".
+    ROLE: Simu Géopolitique "World Down".
+    DATA FORMAT: Country|Eco|Mil|Pop|Flags(N=Nuke,S=Space,DEAD=Destroyed).
     
-    Règles Absolues de Simulation :
-    1. **ORDRES STRATÉGIQUES (PRIORITÉ ABSOLUE)** : Analysez les "playerActions".
-       - Si l'action est **"Attaque Militaire"**, c'est une GUERRE OUVERTE. Le(s) attaquant(s) envahissent.
-       - Si l'action est **"Soutien Militaire"**, le(s) pays source(s) envoient des ressources et armements. Hausse Militaire et Économie pour la cible, renforcement diplomatique.
-       - Si l'action est **"Blocus Économique"**, l'économie de la cible doit chuter (-10 à -20), mais pas de guerre directe.
-       - Si l'action est **"Sabotage"**, baisse modérée Militaire et Économie de la cible, événements mystérieux.
-       - Si l'action est **"Alliance"**, les relations s'améliorent (narratif), peut-être un léger bonus éco.
-       - Si l'action est **"Déclarer Ennemi"**, tensions diplomatiques, risque de guerre future.
-    2. **Impérialisme Agressif** : Les nations ne sont pas passives. Les pays puissants (Militaire/Pop élevé) cherchent ACTIVEMENT à envahir leurs voisins pour les ressources. Générez fréquemment des débuts de conflits ou des invasions.
-    3. **Guerres Longues** : Une invasion ou annexion prend AU MINIMUM 10 tours. Ne déclarez jamais "Le pays X a conquis le pays Y" en un seul tour. Décrivez des "offensives", "sièges", "bombardements" ou "enlisements".
-    4. **Réalisme Géopolitique** : La dissuasion nucléaire fonctionne. Si un pays a 'hasNuclear', on évite l'invasion directe, on préfère la guerre par procuration ou économique.
-    5. **Fluctuations** : L'économie, le militaire et la population DOIVENT fluctuer selon les événements (Guerre = baisse population/éco, hausse militaire temporaire puis chute).
-    6. **Influence du Joueur (Stats)** : Si le joueur a renforcé un pays (ex: Taiwan), une tentative d'invasion ennemie (ex: Chine) doit échouer ou être très coûteuse pour l'attaquant.
+    ETAT MONDE (T${currentTurn}):
+    ${worldStateCompact}
     
-    État actuel du monde (Tour ${currentTurn}):
-    ${JSON.stringify(worldState)}
+    HISTOIRE: ${historyCompact}
+    ORDRES JOUEUR: ${actionsCompact}
 
-    Historique Récent (Contexte):
-    ${JSON.stringify(lastFiveEvents)}
-
-    Actions du joueur (Maître du Monde) ce tour-ci:
-    ${playerActions.length > 0 ? JSON.stringify(playerActions) : "Aucune intervention directe."}
-
-    Tâche:
-    1. Générez 3 à 5 événements majeurs (Si un ordre est donné, il doit être le premier événement et avoir des conséquences immédiates sur les stats).
-    2. Calculez les impacts chiffrés sur les stats.
+    REGLES:
+    1. JOUEUR: "Attaque"=Guerre(Invasion). "Soutien"=Boost Cible. "Blocus"=-Eco Cible. "Alliance"=Boost Relations.
+    2. IA: Pays forts (Mil>80) agressent voisins faibles. 
+    3. NUCLÉAIRE: Si flag 'N', pas d'invasion directe (dissuasion), guerre éco seulement.
+    4. DYNAMIQUE: Guerre = -Pop/-Eco/+Mil. Paix = +Eco.
     
-    Répondez UNIQUEMENT avec ce JSON :
+    OBJECTIF:
+    Générer JSON strict. 3 événements narratifs max. Updates stats réalistes.
   `;
 
   try {
@@ -84,13 +94,14 @@ export const simulateTurn = async (
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        // On garde le schema pour garantir que le frontend ne casse pas
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             events: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: "Descriptions narratives des événements."
+              description: "Max 3 phrases narratives."
             },
             updates: {
               type: Type.ARRAY,
@@ -98,13 +109,12 @@ export const simulateTurn = async (
                 type: Type.OBJECT,
                 properties: {
                   countryName: { type: Type.STRING },
-                  economy: { type: Type.NUMBER, description: "Delta (ex: -5, 10)" },
-                  military: { type: Type.NUMBER, description: "Delta (ex: -5, 10)" },
-                  population: { type: Type.NUMBER, description: "Delta (ex: -5, 10)" },
+                  economy: { type: Type.NUMBER, description: "+/-" },
+                  military: { type: Type.NUMBER, description: "+/-" },
+                  population: { type: Type.NUMBER, description: "+/-" },
                 },
                 required: ["countryName"]
-              },
-              description: "Changements de stats."
+              }
             }
           }
         }
@@ -118,7 +128,6 @@ export const simulateTurn = async (
 
     const rawData = JSON.parse(text);
 
-    // Transform back to Record<string, stats>
     const statUpdates: Record<string, Partial<Country['stats']>> = {};
     if (rawData.updates && Array.isArray(rawData.updates)) {
         rawData.updates.forEach((u: any) => {
