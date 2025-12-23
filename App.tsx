@@ -57,6 +57,7 @@ export default function App() {
     isSimulating: false,
     gameOver: false,
     tokensUsed: 0,
+    globalHistorySummary: "", // Initialisation du résumé
   });
 
   const [playerActions, setPlayerActions] = useState<string[]>([]);
@@ -172,15 +173,25 @@ export default function App() {
     if (gameState.isSimulating) return;
     setGameState(prev => ({ ...prev, isSimulating: true }));
     try {
-      const result = await simulateTurn(gameState.turn, gameState.countries, playerActions, gameState.events);
+      const result = await simulateTurn(
+          gameState.turn, 
+          gameState.countries, 
+          playerActions, 
+          gameState.events,
+          gameState.globalHistorySummary // On passe le résumé actuel
+      );
+      
       const newEvents: GameEvent[] = result.events.map(desc => ({ turn: gameState.turn, description: desc }));
       setPendingEvents(newEvents);
+      
       setGameState(prev => ({ 
           ...prev, 
           turn: prev.turn + 1, 
           events: [...prev.events, ...newEvents], 
           tokensUsed: (prev.tokensUsed || 0) + result.tokenUsage,
-          isSimulating: false 
+          isSimulating: false,
+          // Mise à jour du résumé si l'IA en a renvoyé un nouveau (tous les 10 tours)
+          globalHistorySummary: result.newSummary || prev.globalHistorySummary 
       }));
       setPlayerActions([]);
     } catch (e) { setGameState(prev => ({ ...prev, isSimulating: false })); }
@@ -216,7 +227,11 @@ export default function App() {
   const handleLoadGame = (saveId: string) => {
     const saveToLoad = saves.find(s => s.id === saveId);
     if (saveToLoad && saveToLoad.gameState) {
-      setGameState(saveToLoad.gameState);
+      setGameState({
+          ...saveToLoad.gameState,
+          // Rétro-compatibilité : si une vieille save n'a pas de résumé, on met vide
+          globalHistorySummary: saveToLoad.gameState.globalHistorySummary || "" 
+      });
       setView('GAME');
     }
   };
@@ -230,7 +245,8 @@ export default function App() {
       selectedCountryId: null,
       isSimulating: false,
       gameOver: false,
-      tokensUsed: 0
+      tokensUsed: 0,
+      globalHistorySummary: "" // Reset du résumé pour nouvelle partie
     });
     setView('GAME');
   };

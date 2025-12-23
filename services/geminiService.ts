@@ -24,17 +24,15 @@ const getAI = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// COMPRESSION DES DONNÉES (Point 1: Réduire la verbosité)
+// COMPRESSION DES DONNÉES
 const serializeWorldState = (countries: Country[]) => {
   return countries.map(c => {
     // Format compact: ID|Eco|Mil|Pop|Flags
-    // Ex: US|90|95|40|N_S
     const flags = [];
     if (c.stats.hasNuclear) flags.push('N');
     if (c.stats.hasSpaceProgram) flags.push('S');
     if (c.isDestroyed) flags.push('DEAD');
     
-    // On arrondit pour économiser des caractères
     const e = Math.round(c.stats.economy);
     const m = Math.round(c.stats.military);
     const p = Math.round(c.stats.population);
@@ -44,8 +42,7 @@ const serializeWorldState = (countries: Country[]) => {
 };
 
 const serializeEvents = (events: GameEvent[]) => {
-  // On ne garde que les 3 derniers, format très court
-  // T5: Guerre en Europe
+  // On ne garde que les 3 derniers pour le contexte immédiat
   return events.slice(-3).map(e => `T${e.turn}:${e.description.substring(0, 50)}...`).join('|');
 };
 
@@ -53,8 +50,9 @@ export const simulateTurn = async (
   currentTurn: number,
   countries: Country[],
   playerActions: string[],
-  recentEvents: GameEvent[]
-): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
+  recentEvents: GameEvent[],
+  globalSummary: string = "" // Nouveau paramètre pour l'historique long terme
+): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number, newSummary?: string }> => {
   let ai;
   try {
     ai = getAI();
@@ -62,12 +60,15 @@ export const simulateTurn = async (
     return { events: ["ERREUR SYSTÈME : Clé API manquante."], statUpdates: {}, tokenUsage: 0 };
   }
 
+  // Logique de mise à jour du résumé tous les 10 tours
+  const shouldUpdateSummary = currentTurn % 10 === 0;
+
   // Préparation des données compressées
   const worldStateCompact = serializeWorldState(countries);
-  const historyCompact = serializeEvents(recentEvents);
+  const recentHistoryCompact = serializeEvents(recentEvents);
   const actionsCompact = playerActions.length > 0 ? playerActions.join(". ") : "RAS";
 
-  // Prompt Télégraphique (Point 3: Optimisation System Prompt)
+  // Prompt Optimisé
   const prompt = `
     ROLE: Simu Géopolitique "World Down".
     DATA FORMAT: Country|Eco|Mil|Pop|Flags(N=Nuke,S=Space,DEAD=Destroyed).
@@ -75,18 +76,53 @@ export const simulateTurn = async (
     ETAT MONDE (T${currentTurn}):
     ${worldStateCompact}
     
-    HISTOIRE: ${historyCompact}
+    CONTEXTE HISTORIQUE (Résumé T1-T${Math.max(1, currentTurn - 10)}):
+    ${globalSummary || "Début de l'ère."}
+
+    ÉVÈNEMENTS RÉCENTS (Détail T${Math.max(1, currentTurn - 3)}-T${currentTurn}):
+    ${recentHistoryCompact}
+
     ORDRES JOUEUR: ${actionsCompact}
 
     REGLES:
-    1. JOUEUR: "Attaque"=Guerre(Invasion). "Soutien"=Boost Cible. "Blocus"=-Eco Cible. "Alliance"=Boost Relations.
-    2. IA: Pays forts (Mil>80) agressent voisins faibles. 
-    3. NUCLÉAIRE: Si flag 'N', pas d'invasion directe (dissuasion), guerre éco seulement.
-    4. DYNAMIQUE: Guerre = -Pop/-Eco/+Mil. Paix = +Eco.
+    1. JOUEUR: "Attaque"=Guerre. "Soutien"=Boost. "Blocus"=-Eco. "Alliance"=Amitié.
+    2. IA: Forts (Mil>80) attaquent Faibles.
+    3. NUCLÉAIRE: Flag 'N' = Dissuasion (pas d'invasion directe).
+    4. DYNAMIQUE: Guerre = -Pop/-Eco/+Mil.
+    ${shouldUpdateSummary ? "5. TACHE SUPP: Générer un nouveau résumé global compressé (newSummary) incluant les événements récents marquants." : ""}
     
-    OBJECTIF:
-    Générer JSON strict. 3 événements narratifs max. Updates stats réalistes.
+    OBJECTIF: JSON strict.
   `;
+
+  // Construction dynamique du schéma
+  const schemaProperties: any = {
+    events: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Max 3 phrases narratives."
+    },
+    updates: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          countryName: { type: Type.STRING },
+          economy: { type: Type.NUMBER },
+          military: { type: Type.NUMBER },
+          population: { type: Type.NUMBER },
+        },
+        required: ["countryName"]
+      }
+    }
+  };
+
+  // Ajout du champ résumé si nécessaire
+  if (shouldUpdateSummary) {
+    schemaProperties.newSummary = {
+      type: Type.STRING,
+      description: "Résumé condensé de tout l'historique important (Guerres, Alliances, Annexion) depuis le tour 1 jusqu'à maintenant."
+    };
+  }
 
   try {
     const response = await ai.models.generateContent({
@@ -94,29 +130,9 @@ export const simulateTurn = async (
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        // On garde le schema pour garantir que le frontend ne casse pas
         responseSchema: {
           type: Type.OBJECT,
-          properties: {
-            events: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Max 3 phrases narratives."
-            },
-            updates: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  countryName: { type: Type.STRING },
-                  economy: { type: Type.NUMBER, description: "+/-" },
-                  military: { type: Type.NUMBER, description: "+/-" },
-                  population: { type: Type.NUMBER, description: "+/-" },
-                },
-                required: ["countryName"]
-              }
-            }
-          }
+          properties: schemaProperties
         }
       }
     });
@@ -144,7 +160,8 @@ export const simulateTurn = async (
     return {
         events: rawData.events || [],
         statUpdates,
-        tokenUsage
+        tokenUsage,
+        newSummary: rawData.newSummary // Sera undefined si pas demandé
     };
   } catch (error) {
     console.error("Gemini simulation error:", error);
