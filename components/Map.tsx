@@ -176,10 +176,6 @@ const Map: React.FC<MapProps> = ({
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-sky-100 shadow-inner rounded-xl border border-slate-300">
-      <div className="absolute top-4 left-4 z-10 text-xs text-slate-500 font-mono pointer-events-none bg-white/50 px-2 py-1 rounded backdrop-blur">
-        ZOOM: SCROLL / PAN: DRAG | MODE: {viewMode === 'alliances' ? 'ALLIANCES' : 'POLITIQUE'}
-      </div>
-      
       <svg 
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`} 

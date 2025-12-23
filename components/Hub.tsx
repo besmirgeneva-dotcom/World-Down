@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Plus, Save, Trash2, LogOut, ChevronRight, Globe, BarChart3, Clock } from 'lucide-react';
+import { User, Plus, Save, Trash2, LogOut, ChevronRight, Globe, BarChart3, Clock, AlertCircle } from 'lucide-react';
 
 interface GameSave {
   id: string;
@@ -19,6 +19,10 @@ interface HubProps {
 }
 
 export default function Hub({ user, saves, onNewGame, onLoadGame, onDeleteSave, onLogout }: HubProps) {
+  // Calcul dynamique des statistiques
+  const totalGames = saves.length;
+  const totalTurns = saves.reduce((acc, save) => acc + save.turn, 0);
+
   return (
     <div className="h-screen bg-slate-50 flex flex-col overflow-hidden animate-in fade-in duration-500">
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-100 px-6 md:px-10 py-4 flex items-center justify-between shadow-sm flex-shrink-0 z-50">
@@ -69,12 +73,12 @@ export default function Hub({ user, saves, onNewGame, onLoadGame, onDeleteSave, 
                 </h3>
                 <div className="space-y-4">
                     <div className="flex justify-between items-center border-b border-slate-50 pb-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Simulations</span>
-                        <span className="font-tech font-bold text-slate-900">1,240</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Parties</span>
+                        <span className="font-tech font-bold text-slate-900">{totalGames}</span>
                     </div>
                     <div className="flex justify-between items-center border-b border-slate-50 pb-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Annexions</span>
-                        <span className="font-tech font-bold text-slate-900">482</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Tours Joués</span>
+                        <span className="font-tech font-bold text-slate-900">{totalTurns}</span>
                     </div>
                 </div>
             </div>
@@ -92,6 +96,12 @@ export default function Hub({ user, saves, onNewGame, onLoadGame, onDeleteSave, 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-10">
+                {saves.length === 0 && (
+                  <div className="col-span-2 flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-200 rounded-[2.5rem] text-slate-400 gap-4">
+                    <AlertCircle size={40} className="text-slate-200" />
+                    <p className="font-medium text-sm">Aucune partie sauvegardée dans les archives.</p>
+                  </div>
+                )}
                 {saves.map(save => (
                     <div key={save.id} className="bg-white rounded-[2.5rem] p-8 border border-slate-50 shadow-sm hover:shadow-xl hover:border-blue-100 transition-all group flex flex-col justify-between h-[220px]">
                         <div className="flex justify-between items-start">

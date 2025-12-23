@@ -42,6 +42,7 @@ export interface GameState {
   selectedCountryId: string | null;
   isSimulating: boolean;
   gameOver: boolean;
+  tokensUsed: number;
 }
 
 export enum StatType {

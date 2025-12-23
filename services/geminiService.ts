@@ -15,7 +15,7 @@ export const simulateTurn = async (
   countries: Country[],
   playerActions: string[],
   recentEvents: GameEvent[] // Added history for context
-): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>> }> => {
+): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
   const ai = getAI();
 
   // Filter mainly active countries or just send name + stats to reduce context size
@@ -93,7 +93,9 @@ export const simulateTurn = async (
     });
 
     const text = response.text;
-    if (!text) return { events: ["Erreur de simulation IA."], statUpdates: {} };
+    const tokenUsage = response.usageMetadata?.totalTokenCount || 0;
+
+    if (!text) return { events: ["Erreur de simulation IA."], statUpdates: {}, tokenUsage: 0 };
 
     const rawData = JSON.parse(text);
 
@@ -113,13 +115,15 @@ export const simulateTurn = async (
 
     return {
         events: rawData.events || [],
-        statUpdates
+        statUpdates,
+        tokenUsage
     };
   } catch (error) {
     console.error("Gemini simulation error:", error);
     return {
       events: ["La communication avec le simulateur global a échoué."],
-      statUpdates: {}
+      statUpdates: {},
+      tokenUsage: 0
     };
   }
 };

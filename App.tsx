@@ -8,11 +8,12 @@ import AllianceOverlay from './components/AllianceOverlay';
 import Home from './components/Home';
 import Hub from './components/Hub';
 import LoginModal from './components/LoginModal';
+import SettingsModal from './components/SettingsModal';
 import { Country, GameState, StatType, GameEvent, Alliance } from './types';
 import { simulateTurn } from './services/geminiService';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { Globe, Play, Loader2, Swords, History, Users } from 'lucide-react';
+import { Globe, Play, Loader2, Swords, History, Users, Settings, Eye, Cpu } from 'lucide-react';
 
 const INITIAL_ALLIANCES: Alliance[] = [
   { id: 'NATO', name: 'OTAN', color: '#004990', leaderId: 'United States' },
@@ -39,11 +40,10 @@ export default function App() {
   const [view, setView] = useState<ViewMode>('HOME');
   const [user, setUser] = useState<{ name: string; email: string } | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [saves, setSaves] = useState([
-    { id: '1', name: 'Hégémonie Américaine', turn: 42, date: 'Il y a 2h', status: 'Stable' },
-    { id: '2', name: 'Empire du Soleil', turn: 15, date: 'Hier', status: 'En Guerre' }
-  ]);
+  
+  const [saves, setSaves] = useState<{ id: string; name: string; turn: number; date: string; status: string }[]>([]);
 
   const [gameState, setGameState] = useState<GameState>({
     turn: 1,
@@ -53,6 +53,7 @@ export default function App() {
     selectedCountryId: null,
     isSimulating: false,
     gameOver: false,
+    tokensUsed: 0,
   });
 
   const [playerActions, setPlayerActions] = useState<string[]>([]);
@@ -68,7 +69,6 @@ export default function App() {
   // Monitor Firebase Auth State
   useEffect(() => {
     if (!auth) {
-      // Si auth n'est pas initialisé (mauvaise config), on arrête le loading mais on reste déconnecté
       setIsAuthLoading(false);
       return;
     }
@@ -90,14 +90,14 @@ export default function App() {
     return () => unsubscribe();
   }, [view]);
 
+  // Auto-switch view mode based on action, but allows manual override now
   useEffect(() => {
-    if (['Alliance', 'Rejoindre Alliance', 'Quitter Alliance'].includes(commandAction)) setMapViewMode('alliances');
-    else setMapViewMode('political');
+    if (['Alliance', 'Rejoindre Alliance', 'Quitter Alliance'].includes(commandAction)) {
+      setMapViewMode('alliances');
+    }
   }, [commandAction]);
 
   const handleLogin = (userData: { name: string; email: string }) => {
-    // This is primarily called by the modal for immediate UI feedback, 
-    // but onAuthStateChanged will handle the actual source of truth
     setUser(userData);
     setIsLoginModalOpen(false);
     setView('HUB');
@@ -107,7 +107,6 @@ export default function App() {
     if (!auth) return;
     try {
       await signOut(auth);
-      // view change handled by onAuthStateChanged
     } catch (error) {
       console.error("Logout failed", error);
     }
@@ -160,9 +159,27 @@ export default function App() {
       const result = await simulateTurn(gameState.turn, gameState.countries, playerActions, gameState.events);
       const newEvents: GameEvent[] = result.events.map(desc => ({ turn: gameState.turn, description: desc }));
       setPendingEvents(newEvents);
-      setGameState(prev => ({ ...prev, turn: prev.turn + 1, events: [...prev.events, ...newEvents], isSimulating: false }));
+      setGameState(prev => ({ 
+          ...prev, 
+          turn: prev.turn + 1, 
+          events: [...prev.events, ...newEvents], 
+          tokensUsed: (prev.tokensUsed || 0) + result.tokenUsage,
+          isSimulating: false 
+      }));
       setPlayerActions([]);
     } catch (e) { setGameState(prev => ({ ...prev, isSimulating: false })); }
+  };
+
+  const handleSaveGame = () => {
+    const newSave = {
+      id: Date.now().toString(),
+      name: `Partie ${saves.length + 1} (Tour ${gameState.turn})`,
+      turn: gameState.turn,
+      date: new Date().toLocaleDateString('fr-FR', { hour: '2-digit', minute:'2-digit' }),
+      status: 'En cours'
+    };
+    setSaves(prev => [newSave, ...prev]);
+    setIsSettingsOpen(false);
   };
 
   if (isAuthLoading) {
@@ -182,18 +199,46 @@ export default function App() {
     <div className="flex flex-col h-screen max-h-screen w-full bg-white text-slate-900 overflow-hidden font-sans animate-fadeIn">
       {pendingEvents.length > 0 && <EventCard event={pendingEvents[0]} onNext={() => setPendingEvents(p => p.slice(1))} isLast={pendingEvents.length === 1} />}
       <EventLog events={gameState.events} isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        onSave={handleSaveGame} 
+        onLoad={() => setView('HUB')} 
+        onHub={() => setView('HUB')} 
+        onQuit={() => setView('HOME')} 
+      />
       {isCommandMode && <CommandBar sources={commandSources} target={commandTarget} action={commandAction} onActionChange={setCommandAction} activeSlot={activeCommandSlot} onSlotClick={setActiveCommandSlot} onExecute={handleExecuteCommand} onCancel={() => setIsCommandMode(false)} />}
       
       <header className="h-20 border-b border-slate-100 bg-white/95 flex items-center justify-between px-8 backdrop-blur-md z-10 relative shadow-sm flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg">
-            <Globe size={24} className="animate-spin-slow" />
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
+            <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg">
+              <Globe size={24} className="animate-spin-slow" />
+            </div>
+            {/* Suppression du onClick sur le titre */}
+            <h1 className="text-2xl md:text-3xl font-tech font-bold text-slate-900 tracking-tighter uppercase cursor-default">
+              WORLD<span className="text-blue-600">DOWN</span>
+            </h1>
           </div>
-          <h1 onClick={() => setView('HUB')} className="text-2xl md:text-3xl font-tech font-bold text-slate-900 tracking-tighter cursor-pointer hover:text-blue-600 transition-colors uppercase">
-            WORLD<span className="text-blue-600">DOWN</span>
-          </h1>
+          
+          {/* Bouton Paramètres */}
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors font-bold text-xs uppercase tracking-wider"
+          >
+            <Settings size={16} />
+            Paramètres
+          </button>
         </div>
+
         <div className="flex items-center gap-8">
+            <div className="flex flex-col items-end border-r border-slate-100 pr-6 mr-0">
+                <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest">Tokens</span>
+                <div className="flex items-center gap-2">
+                    <Cpu size={14} className="text-slate-400" />
+                    <span className="font-tech text-slate-700 font-bold text-2xl">{gameState.tokensUsed}</span>
+                </div>
+            </div>
             <div className="flex flex-col items-end">
                 <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest">Temps Mondial</span>
                 <span className="font-tech text-blue-600 font-bold text-2xl">TOUR {gameState.turn}</span>
@@ -212,6 +257,13 @@ export default function App() {
             </button>
             <button onClick={() => setIsCommandMode(true)} className="bg-slate-900 text-white p-3 rounded-2xl shadow-2xl hover:bg-black transition-all group flex items-center gap-3">
                 <Swords size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">Actions</span>
+            </button>
+            {/* Bouton Toggle Vue Politique/Alliance */}
+            <button 
+              onClick={() => setMapViewMode(prev => prev === 'political' ? 'alliances' : 'political')} 
+              className={`p-3 rounded-2xl shadow-2xl transition-all group flex items-center gap-3 border ${mapViewMode === 'alliances' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-900 border-slate-100 hover:bg-slate-50'}`}
+            >
+                <Eye size={24} /><span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-bold text-[10px] uppercase tracking-widest whitespace-nowrap">{mapViewMode === 'political' ? 'Vue Politique' : 'Vue Alliances'}</span>
             </button>
         </div>
 
