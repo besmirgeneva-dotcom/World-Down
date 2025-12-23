@@ -182,6 +182,15 @@ export default function App() {
     setIsSettingsOpen(false);
   };
 
+  const handleLeaderChange = (allianceId: string, newLeaderId: string) => {
+    setGameState(prev => ({
+      ...prev,
+      alliances: prev.alliances.map(a => 
+        a.id === allianceId ? { ...a, leaderId: newLeaderId } : a
+      )
+    }));
+  };
+
   if (isAuthLoading) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-white">
@@ -207,6 +216,15 @@ export default function App() {
         onHub={() => setView('HUB')} 
         onQuit={() => setView('HOME')} 
       />
+      {/* Affichage conditionnel de l'Overlay d'Alliance */}
+      {mapViewMode === 'alliances' && (
+        <AllianceOverlay 
+          alliances={gameState.alliances} 
+          countries={gameState.countries} 
+          onLeaderChange={handleLeaderChange} 
+        />
+      )}
+
       {isCommandMode && <CommandBar sources={commandSources} target={commandTarget} action={commandAction} onActionChange={setCommandAction} activeSlot={activeCommandSlot} onSlotClick={setActiveCommandSlot} onExecute={handleExecuteCommand} onCancel={() => setIsCommandMode(false)} />}
       
       <header className="h-20 border-b border-slate-100 bg-white/95 flex items-center justify-between px-8 backdrop-blur-md z-10 relative shadow-sm flex-shrink-0">

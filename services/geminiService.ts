@@ -1,13 +1,27 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Country, GameEvent } from "../types";
 
-// Helper to initialize AI. 
+// Helper robuste pour récupérer la clé API (supporte process.env et Vite import.meta.env)
+const getApiKey = () => {
+  // @ts-ignore - Support Vite
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+    // @ts-ignore
+    return import.meta.env.VITE_API_KEY;
+  }
+  // @ts-ignore - Support Node/Webpack
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    return process.env.API_KEY;
+  }
+  return undefined;
+};
+
 const getAI = () => {
-  if (!process.env.API_KEY) {
-    console.error("API_KEY is missing");
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    console.error("API_KEY is missing. Please set VITE_API_KEY or API_KEY in your environment.");
     throw new Error("API Key missing");
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey });
 };
 
 export const simulateTurn = async (
@@ -16,7 +30,12 @@ export const simulateTurn = async (
   playerActions: string[],
   recentEvents: GameEvent[] // Added history for context
 ): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
-  const ai = getAI();
+  let ai;
+  try {
+    ai = getAI();
+  } catch (e) {
+    return { events: ["ERREUR SYSTÈME : Clé API manquante."], statUpdates: {}, tokenUsage: 0 };
+  }
 
   // Filter mainly active countries or just send name + stats to reduce context size
   const worldState = countries.map(c => ({
