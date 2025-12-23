@@ -45,16 +45,7 @@ const getShortCode = (name: string): string => {
 
 // --- ENGINE: HYBRID LOGIC ---
 
-// 1. Détection de situation volatile (Guerre, Tension)
-// Si FAUX et aucune action joueur -> Mode Lazy
-const isVolatileSituation = (recentEvents: GameEvent[]): boolean => {
-  const KEYWORDS = ["GUERRE", "WAR", "ATTAQUE", "NUCLÉAIRE", "NUCLEAR", "ANNEXION", "DÉTRUIT", "CRISE", "ALLIANCE", "HOSTILE"];
-  const lastEvents = recentEvents.slice(-3); // On regarde juste les 3 derniers tours
-  const combinedText = lastEvents.map(e => e.description.toUpperCase()).join(" ");
-  return KEYWORDS.some(k => combinedText.includes(k));
-};
-
-// 2. Calcul Local (Moteur mathématique simple)
+// Calcul Local (Moteur mathématique simple)
 const calculatePassiveGrowth = (country: Country): Partial<Country['stats']> => {
   if (country.isDestroyed) return {};
 
@@ -119,33 +110,9 @@ export const simulateTurn = async (
   recentEvents: GameEvent[]
 ): Promise<{ events: string[], statUpdates: Record<string, Partial<Country['stats']>>, tokenUsage: number }> => {
   
-  // STRATEGIE 2: LAZY MODE
-  // Si pas d'action joueur ET situation calme -> Simulation locale uniquement (Coût 0)
-  const isActionTurn = playerActions.length > 0;
-  const isVolatile = isVolatileSituation(recentEvents);
+  // Note: On a supprimé le "Lazy Mode" (Marchés stables) car le jeu impose maintenant au moins une action.
+  // On utilise toujours Gemini pour générer une réponse narrative intéressante.
 
-  if (!isActionTurn && !isVolatile) {
-    // Mode Lazy
-    const localUpdates: Record<string, Partial<Country['stats']>> = {};
-    countries.forEach(c => {
-      localUpdates[c.name] = calculatePassiveGrowth(c);
-    });
-    
-    // Un petit event d'ambiance de temps en temps
-    const flavorTexts = [
-      "Marchés stables.", "Calme diplomatique.", "Routine administrative.", 
-      "Légère croissance globale.", "Status quo maintenu."
-    ];
-    const randomEvent = flavorTexts[Math.floor(Math.random() * flavorTexts.length)];
-
-    return {
-      events: [randomEvent],
-      statUpdates: localUpdates,
-      tokenUsage: 0
-    };
-  }
-
-  // Si on est ici, on appelle l'IA (Mode Actif)
   let ai;
   try {
     ai = getAI();
@@ -167,7 +134,8 @@ export const simulateTurn = async (
 
   const worldState = serializeWorldState(relevantCountries);
   const history = serializeEvents(recentEvents);
-  const actions = isActionTurn ? playerActions.join(".") : "Wait";
+  // playerActions ne devrait jamais être vide ici, mais safety check
+  const actions = playerActions.length > 0 ? playerActions.join(".") : "Wait";
 
   // STRATEGIE 3: SYSTEM INSTRUCTION (Caching Ready)
   // Les règles statiques vont dans le systemInstruction
@@ -238,7 +206,7 @@ ACT:${actions}
         }
     });
 
-    if (events.length === 0) events.push("Tensions palpables.");
+    if (events.length === 0) events.push("Tensions géopolitiques.");
 
     // MERGE: On combine les mises à jour IA (prioritaires) avec les mises à jour passives locales
     const finalUpdates = { ...passiveUpdates, ...aiUpdates };

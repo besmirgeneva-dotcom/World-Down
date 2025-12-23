@@ -14,7 +14,7 @@ import { simulateTurn } from './services/geminiService';
 import { auth } from './services/firebase';
 import { getUserSaves, saveGameToFirestore, deleteSaveFromFirestore, GameSaveData } from './services/saveService';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { Globe, Play, Loader2, Swords, History, Users, Settings, Eye, Cpu } from 'lucide-react';
+import { Globe, Play, Loader2, Swords, History, Users, Settings, Eye, Cpu, AlertCircle } from 'lucide-react';
 
 const INITIAL_ALLIANCES: Alliance[] = [
   { id: 'NATO', name: 'OTAN', color: '#004990', leaderId: 'United States' },
@@ -147,29 +147,87 @@ export default function App() {
 
   const handleExecuteCommand = () => {
      if (commandSources.length === 0) return;
-     const conqueror = commandSources[0];
+     const conqueror = commandSources[0]; // Leader ou source principale
+     
+     // Copie profonde pour modification locale optimiste
      let updatedCountries = [...gameState.countries];
+     let updatedAlliances = [...gameState.alliances];
      let commandDesc = "";
 
+     // --- Logique Locale pour mise à jour immédiate ---
+     
      if (commandAction === 'Annexer' && commandTarget) {
         updatedCountries = updatedCountries.map(c => c.name === commandTarget.name ? { ...c, ownerId: conqueror.name, isDestroyed: false } : c);
         commandDesc = `CONQUÊTE: ${conqueror.name} a annexé ${commandTarget.name}.`;
+     
+     } else if (commandAction === 'Alliance') {
+        const allianceName = `Coalition ${conqueror.name}`;
+        const allianceId = `ALL_${Date.now()}`;
+        // Couleur aléatoire vibrante
+        const colors = ['#ec4899', '#8b5cf6', '#14b8a6', '#f59e0b', '#6366f1'];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        
+        const newAlliance: Alliance = {
+            id: allianceId,
+            name: allianceName,
+            color: color,
+            leaderId: conqueror.name
+        };
+        updatedAlliances.push(newAlliance);
+
+        // Mettre à jour les pays sources
+        updatedCountries = updatedCountries.map(c => 
+            commandSources.some(s => s.name === c.name) ? { ...c, allianceId: allianceId } : c
+        );
+        commandDesc = `DIPLOMATIE: Création de l'alliance "${allianceName}" par ${conqueror.name}.`;
+
+     } else if (commandAction === 'Rejoindre Alliance' && commandTarget && commandTarget.allianceId) {
+        updatedCountries = updatedCountries.map(c => 
+            commandSources.some(s => s.name === c.name) ? { ...c, allianceId: commandTarget.allianceId } : c
+        );
+        commandDesc = `DIPLOMATIE: ${conqueror.name} rejoint l'alliance de ${commandTarget.name}.`;
+
+     } else if (commandAction === 'Quitter Alliance') {
+        updatedCountries = updatedCountries.map(c => 
+            commandSources.some(s => s.name === c.name) ? { ...c, allianceId: null } : c
+        );
+        commandDesc = `DIPLOMATIE: ${conqueror.name} quitte son alliance.`;
+
      } else {
-        commandDesc = `ORDRE: ${commandSources.map(s => s.name).join(', ')} exécute ${commandAction}.`;
+        // Actions sans changement structurel (juste narratif + stats API)
+        commandDesc = `ORDRE: ${commandSources.map(s => s.name).join(', ')} exécute ${commandAction} ${commandTarget ? `sur ${commandTarget.name}` : ''}.`;
      }
 
-     setGameState(prev => ({ ...prev, countries: updatedCountries }));
+     setGameState(prev => ({ 
+         ...prev, 
+         countries: updatedCountries,
+         alliances: updatedAlliances
+     }));
+     
      setPlayerActions(prev => [...prev, commandDesc]);
+     
+     // RESET COMPLET DE L'INTERFACE DE COMMANDE
+     setCommandSources([]);
+     setCommandTarget(null);
      setIsCommandMode(false);
+     setCommandAction(ACTIONS[0].id); // Retour à l'action par défaut
+     setActiveCommandSlot('source');
   };
 
   const handleNextTurn = async () => {
     if (gameState.isSimulating) return;
+
+    // BLOCAGE: Au moins 1 action requise
+    if (playerActions.length === 0) {
+        // On pourrait ajouter un toast/notification ici
+        // Pour l'instant, le bouton est visuellement désactivé, 
+        // mais si l'utilisateur force, on ne fait rien.
+        return;
+    }
+
     setGameState(prev => ({ ...prev, isSimulating: true }));
     
     try {
-      // Le service gère maintenant le "Lazy Mode" et le "Hybrid Engine" en interne
-      // Il retourne statUpdates qui contient à la fois les updates IA et les updates Passifs Locaux
       const result = await simulateTurn(
           gameState.turn, 
           gameState.countries, 
@@ -181,7 +239,6 @@ export default function App() {
       setPendingEvents(newEvents);
       
       setGameState(prev => {
-        // Appliquer les mises à jour (qu'elles viennent de l'IA ou du moteur local)
         const updatedCountries = prev.countries.map(country => {
             const updates = result.statUpdates[country.name];
             if (updates) {
@@ -262,6 +319,8 @@ export default function App() {
     }));
   };
 
+  const canPassTurn = playerActions.length > 0;
+
   if (isAuthLoading) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-white">
@@ -339,9 +398,19 @@ export default function App() {
                 <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest">Temps Mondial</span>
                 <span className="font-tech text-blue-600 font-bold text-2xl">TOUR {gameState.turn}</span>
             </div>
-            <button onClick={handleNextTurn} disabled={gameState.isSimulating} className="flex items-center gap-3 px-6 py-3 bg-blue-600 text-white font-tech font-bold uppercase rounded-2xl shadow-xl shadow-blue-50 hover:bg-blue-700 transition-all active:scale-95 text-xs">
-                {gameState.isSimulating ? <Loader2 className="animate-spin" size={18} /> : <Play fill="currentColor" size={16} />}
-                {gameState.isSimulating ? 'Calcul...' : 'TOUR SUIVANT'}
+            <button 
+                onClick={handleNextTurn} 
+                disabled={gameState.isSimulating || !canPassTurn} 
+                className={`
+                    flex items-center gap-3 px-6 py-3 font-tech font-bold uppercase rounded-2xl shadow-xl transition-all text-xs
+                    ${!canPassTurn 
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' 
+                        : 'bg-blue-600 text-white shadow-blue-50 hover:bg-blue-700 active:scale-95'
+                    }
+                `}
+            >
+                {gameState.isSimulating ? <Loader2 className="animate-spin" size={18} /> : (!canPassTurn ? <AlertCircle size={16} /> : <Play fill="currentColor" size={16} />)}
+                {gameState.isSimulating ? 'Calcul...' : (!canPassTurn ? 'Action Requise' : 'TOUR SUIVANT')}
             </button>
         </div>
       </header>
