@@ -143,7 +143,18 @@ export default function App() {
           if (exists) return prev.filter(c => c.name !== effectiveOwner!.name);
           return [...prev, effectiveOwner!];
         });
-      } else setCommandTarget(country || null);
+      } else {
+        // Logique spécifique pour la cible selon l'action
+        if (commandAction === 'Rejoindre Alliance') {
+             // Si on veut rejoindre une alliance, on ne peut cliquer que sur les LEADERS
+             const targetAlliance = gameState.alliances.find(a => a.leaderId === country?.id);
+             if (targetAlliance) {
+                 setCommandTarget(country || null);
+             }
+        } else {
+            setCommandTarget(country || null);
+        }
+      }
     } else setGameState(prev => ({ ...prev, selectedCountryId: effectiveOwnerId }));
   };
 
@@ -154,6 +165,15 @@ export default function App() {
     if (currentMods.includes(stat)) {
         return; // Modification bloquée
     }
+
+    // AJOUT: Enregistrement de l'action pour permettre le passage du tour
+    const statLabels: Record<string, string> = {
+        [StatType.ECONOMY]: 'Économie',
+        [StatType.MILITARY]: 'Militaire',
+        [StatType.POPULATION]: 'Population'
+    };
+    const actionDesc = `POLITIQUE: ${countryName} a ajusté son niveau de ${statLabels[stat]} (${delta > 0 ? '+' : ''}${delta}).`;
+    setPlayerActions(prev => [...prev, actionDesc]);
 
     setGameState(prev => {
         // Enregistrer la modification
@@ -179,13 +199,50 @@ export default function App() {
   };
 
   const handleToggleCapability = (countryName: string, capability: 'hasNuclear' | 'hasSpaceProgram') => {
-    setGameState(prev => ({
-      ...prev,
-      countries: prev.countries.map(c => {
-        if (c.name !== countryName) return c;
-        return { ...c, stats: { ...c.stats, [capability]: !c.stats[capability] } };
-      })
-    }));
+    const country = gameState.countries.find(c => c.name === countryName);
+    if (!country) return;
+
+    // RÈGLE 1 : Limitation d'une modification par tour (StatType.NUCLEAR ou StatType.SPACE)
+    const currentMods = gameState.turnModifications[countryName] || [];
+    const statType = capability === 'hasNuclear' ? StatType.NUCLEAR : StatType.SPACE;
+    
+    // Si ON A DÉJÀ touché au nucléaire OU au spatial ce tour-ci, on bloque
+    if (currentMods.includes(StatType.NUCLEAR) || currentMods.includes(StatType.SPACE)) {
+        return; 
+    }
+
+    // RÈGLE 2 : Dépendance technologique
+    // Pour activer le Nucléaire, il faut avoir le Spatial
+    if (capability === 'hasNuclear') {
+        // Si on essaie d'activer (donc actuellement c'est false)
+        if (!country.stats.hasNuclear && !country.stats.hasSpaceProgram) {
+            // Pas de programme spatial = Pas de nucléaire
+            return;
+        }
+    }
+
+    // AJOUT: Enregistrement de l'action
+    const capLabel = capability === 'hasNuclear' ? 'Arsenal Nucléaire' : 'Programme Spatial';
+    // On devine l'action (activation ou désactivation) basé sur l'état actuel inversé
+    const newStatus = !country.stats[capability] ? "lancé" : "abandonné";
+    const actionDesc = `STRATÉGIE: ${countryName} a ${newStatus} son ${capLabel}.`;
+    setPlayerActions(prev => [...prev, actionDesc]);
+
+    setGameState(prev => {
+        const updatedMods = { 
+            ...prev.turnModifications, 
+            [countryName]: [...(prev.turnModifications[countryName] || []), statType] 
+        };
+
+        return {
+            ...prev,
+            turnModifications: updatedMods,
+            countries: prev.countries.map(c => {
+                if (c.name !== countryName) return c;
+                return { ...c, stats: { ...c.stats, [capability]: !c.stats[capability] } };
+            })
+        };
+    });
   };
   // ----------------------------------
 
@@ -197,6 +254,16 @@ export default function App() {
      let updatedCountries = [...gameState.countries];
      let updatedAlliances = [...gameState.alliances];
      let commandDesc = "";
+
+     // --- Validation des Règles Spéciales ---
+     
+     if (commandAction === 'Rejoindre Alliance') {
+        // RÈGLE: On ne peut pas rejoindre une autre alliance si on est déjà dans une alliance.
+        if (conqueror.allianceId) {
+            alert(`Action impossible : ${conqueror.name} doit d'abord quitter son alliance actuelle (${updatedAlliances.find(a => a.id === conqueror.allianceId)?.name}).`);
+            return;
+        }
+     }
 
      // --- Logique Locale pour mise à jour immédiate ---
      
@@ -225,17 +292,34 @@ export default function App() {
         );
         commandDesc = `DIPLOMATIE: Création de l'alliance "${allianceName}" par ${conqueror.name}.`;
 
-     } else if (commandAction === 'Rejoindre Alliance' && commandTarget && commandTarget.allianceId) {
-        updatedCountries = updatedCountries.map(c => 
-            commandSources.some(s => s.name === c.name) ? { ...c, allianceId: commandTarget.allianceId } : c
-        );
-        commandDesc = `DIPLOMATIE: ${conqueror.name} rejoint l'alliance de ${commandTarget.name}.`;
+     } else if (commandAction === 'Rejoindre Alliance' && commandTarget) {
+        // commandTarget doit être le LEADER de l'alliance cible
+        const targetAllianceId = commandTarget.allianceId;
+        
+        if (targetAllianceId) {
+            updatedCountries = updatedCountries.map(c => 
+                commandSources.some(s => s.name === c.name) ? { ...c, allianceId: targetAllianceId } : c
+            );
+            const allianceName = updatedAlliances.find(a => a.id === targetAllianceId)?.name;
+            commandDesc = `DIPLOMATIE: ${conqueror.name} a officiellement rejoint l'alliance ${allianceName}.`;
+        }
 
      } else if (commandAction === 'Quitter Alliance') {
         updatedCountries = updatedCountries.map(c => 
             commandSources.some(s => s.name === c.name) ? { ...c, allianceId: null } : c
         );
         commandDesc = `DIPLOMATIE: ${conqueror.name} quitte son alliance.`;
+
+     } else if (commandAction === 'Amis' && commandTarget) {
+        // ACTION AMIS : Bonus économique mutuel + Narrative
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === conqueror.name || c.name === commandTarget.name) {
+                const newEco = Math.min(100, c.stats.economy + 5); // +5% économie
+                return { ...c, stats: { ...c.stats, economy: newEco } };
+            }
+            return c;
+        });
+        commandDesc = `DIPLOMATIE: Traité d'amitié et de coopération économique signé entre ${conqueror.name} et ${commandTarget.name}.`;
 
      } else {
         // Actions sans changement structurel (juste narratif + stats API)
@@ -478,7 +562,16 @@ export default function App() {
         </div>
 
         <div className="flex-1 flex items-center justify-center bg-white h-full relative">
-            <Map countries={gameState.countries} alliances={gameState.alliances} selectedCountryId={gameState.selectedCountryId} onSelectCountry={handleCountrySelect} commandSources={commandSources} commandTarget={commandTarget} viewMode={mapViewMode} />
+            <Map 
+                countries={gameState.countries} 
+                alliances={gameState.alliances} 
+                selectedCountryId={gameState.selectedCountryId} 
+                onSelectCountry={handleCountrySelect} 
+                commandSources={commandSources} 
+                commandTarget={commandTarget} 
+                viewMode={mapViewMode} 
+                commandAction={commandAction} 
+            />
         </div>
 
         <div className={`absolute top-6 bottom-6 right-6 w-[360px] transition-transform duration-700 ease-out z-20 ${gameState.selectedCountryId && !isCommandMode ? 'translate-x-0' : 'translate-x-[130%]'}`}>

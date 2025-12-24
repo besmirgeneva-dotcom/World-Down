@@ -109,6 +109,8 @@ const generateFallbackLogic = (actions: string[], countries: Country[]) => {
             events.push(decodeEvent("ALLIANCE_JOIN", source, "l'Alliance"));
         } else if (lower.includes("quitte")) {
             events.push(decodeEvent("ALLIANCE_LEAVE", source, "ses alliés"));
+        } else if (lower.includes("amis") || lower.includes("amitié")) {
+            events.push(decodeEvent("FRIENDSHIP", source, "l'allié"));
         } else if (lower.includes("annexé") || lower.includes("conquête")) {
             events.push(decodeEvent("WAR_WIN", source, "l'ennemi"));
         } else if (lower.includes("attaque")) {
@@ -162,17 +164,26 @@ export const simulateTurn = async (
   const history = recentEvents.slice(-3).map(e => `T${e.turn}:${e.description.substring(0, 20)}`).join('|');
   const actions = playerActions.join(". ");
 
+  // CALCUL DE LA CIBLE D'ÉVÈNEMENTS
+  // Si 1 action joueur -> +2 random events (Total 3)
+  // Si 2 actions joueur -> +1 random event (Total 3)
+  // Si >=3 actions joueur -> 0 random event (Total = Joueur)
+  const playerActionCount = playerActions.length;
+  const randomEventsNeeded = Math.max(0, 3 - playerActionCount);
+
   // SYSTEM INSTRUCTION: COMPRESSED LOGIC MODE
   // On demande à l'IA d'agir comme un moteur logique, pas un écrivain.
   // Elle doit sortir des CODES que notre moteur interne transformera en beau texte.
   const systemInstruction = `
 ROLE: Geopolitical Simulator Core.
 INPUT: State, History, Actions.
-TASK: Determine outcomes of actions and random global events.
+TASK: 
+1. Determine outcomes of the ${playerActionCount} provided player actions.
+2. Generate exactly ${randomEventsNeeded} additional RANDOM major geopolitical events (involving nations NOT in ACT if possible) to reach a dynamic world state.
 OUTPUT FORMAT:
 #E
 EVENT:CODE|SOURCE_CODE|TARGET_CODE|EXTRA_INFO
-(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, NUKE, ECO_BLOCK, SABOTAGE, GENERIC)
+(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, FRIENDSHIP, NUKE, ECO_BLOCK, SABOTAGE, GENERIC)
 #U
 CODE:Eco:Mil:Pop
 `;

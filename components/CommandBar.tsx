@@ -1,5 +1,5 @@
 import React from 'react';
-import { Swords, ShieldAlert, Ban, Handshake, Skull, CheckCircle, X, MousePointerClick, ChevronDown, ShieldCheck, LogIn, LogOut, Radiation, Flag, Landmark } from 'lucide-react';
+import { Swords, ShieldAlert, Ban, Handshake, Skull, CheckCircle, X, MousePointerClick, ChevronDown, ShieldCheck, LogIn, LogOut, Radiation, Flag, Landmark, HeartHandshake } from 'lucide-react';
 import { Country } from '../types';
 
 interface CommandBarProps {
@@ -24,6 +24,7 @@ export const ACTIONS = [
   { id: 'Alliance', label: 'Créer Alliance', icon: Handshake, color: 'text-blue-600', bg: 'bg-blue-50' },
   { id: 'Rejoindre Alliance', label: 'Rejoindre Alliance', icon: LogIn, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   { id: 'Quitter Alliance', label: 'Quitter Alliance', icon: LogOut, color: 'text-slate-600', bg: 'bg-slate-50' },
+  { id: 'Amis', label: 'Amis', icon: HeartHandshake, color: 'text-teal-600', bg: 'bg-teal-50' },
   { id: 'Déclarer Ennemi', label: 'Ennemi', icon: Skull, color: 'text-purple-600', bg: 'bg-purple-50' },
 ];
 

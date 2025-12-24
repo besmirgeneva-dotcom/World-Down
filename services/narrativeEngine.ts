@@ -29,6 +29,11 @@ const TEMPLATES: Record<string, string[]> = {
     "RUPTURE DIPLOMATIQUE : Coup de théâtre à l'ONU, {source} claque la porte de son alliance. Les analystes prédisent une période d'instabilité majeure alors que les anciens alliés deviennent des rivaux potentiels.",
     "ISOLATIONNISME : {source} déclare son indépendance stratégique et quitte le bloc de {target}. 'Nous ne suivrons plus les ordres de puissances étrangères', a déclaré le président lors d'une allocution télévisée."
   ],
+  "FRIENDSHIP": [
+    "COOPÉRATION RENFORCÉE : {source} et {target} signent un accord de libre-échange sans précédent. Les économistes prévoient un boom de croissance pour les deux nations.",
+    "RAPPROCHEMENT DIPLOMATIQUE : Visite d'état historique entre les dirigeants de {source} et {target}. L'atmosphère est à la détente et à la coopération mutuelle.",
+    "ALLIÉS ÉCONOMIQUES : Un pont commercial est établi entre {source} et {target}, scellant une amitié durable basée sur la prospérité partagée."
+  ],
 
   // --- NUCLÉAIRE ---
   "NUKE": [

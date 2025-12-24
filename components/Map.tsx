@@ -11,6 +11,7 @@ interface MapProps {
   commandSources: Country[]; 
   commandTarget: Country | null;
   viewMode: 'political' | 'alliances';
+  commandAction?: string; // Nouvelle prop pour savoir quelle action est en cours
 }
 
 // Palette excluding Blue (#0ea5e9, etc) and Green (#22c55e, etc)
@@ -61,7 +62,8 @@ const Map: React.FC<MapProps> = ({
   onSelectCountry, 
   commandSources, 
   commandTarget,
-  viewMode
+  viewMode,
+  commandAction
 }) => {
   const [geoData, setGeoData] = useState<any>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -124,7 +126,6 @@ const Map: React.FC<MapProps> = ({
   }, [geoData]); 
 
   const getCountryColor = (countryName: string, isSelected: boolean) => {
-    // 0. Destroyed State (Highest Priority after selection logic, or even before?)
     const countryData = countries.find(c => c.name === countryName);
     
     // Command Overrides
@@ -132,12 +133,22 @@ const Map: React.FC<MapProps> = ({
     if (commandTarget?.name === countryName) return "#ef4444"; // Red-500
     if (isSelected) return "#0ea5e9"; // Sky-500
 
+    // RÈGLE SPÉCIALE: Si on rejoint une alliance, on grise tout ce qui n'est pas un leader d'alliance
+    if (commandAction === 'Rejoindre Alliance') {
+        const isAllianceLeader = alliances.some(a => a.leaderId === countryData?.id);
+        if (isAllianceLeader) {
+             // Si c'est un leader, on le met en évidence (or/jaune)
+             return "#f59e0b"; // Amber-500
+        }
+        // Sinon grisé
+        return "#e2e8f0"; // Slate-200
+    }
+
     if (countryData?.isDestroyed) {
         return "#334155"; // Slate-700 (Ash Gray/Dark)
     }
 
     // Determine the effective owner for coloring (Annexation logic)
-    // If country is owned by another, use the owner's ID/Name to resolve color/alliance
     const ownerId = countryData?.ownerId || countryName;
     const ownerData = countries.find(c => c.name === ownerId);
 
@@ -152,8 +163,6 @@ const Map: React.FC<MapProps> = ({
     }
     
     // 3. Political View Mode (Default)
-    // Use the OWNER's name to generate the color hash. 
-    // This visually merges annexed territories.
     return getStableColor(ownerId);
   };
 
@@ -197,13 +206,17 @@ const Map: React.FC<MapProps> = ({
             const ownerId = countryData?.ownerId || countryName;
 
             // Check if this specific feature's OWNER matches the selected global ID
-            // This ensures that if we select "France", "France (the territory)" and "Spain (the annexed territory)" both light up.
             const isSelected = selectedCountryId === ownerId;
             
+            // Interaction logic for Join Alliance mode
+            const isInteractable = commandAction !== 'Rejoindre Alliance' || alliances.some(a => a.leaderId === countryData?.id);
+
             return (
               <g key={`region-${i}`} onClick={(e) => {
                 e.stopPropagation();
-                onSelectCountry(countryName);
+                if (isInteractable) {
+                    onSelectCountry(countryName);
+                }
               }}>
                 <path
                   d={pathGenerator(feature) || ""}
@@ -211,7 +224,7 @@ const Map: React.FC<MapProps> = ({
                   stroke={getCountryStroke(countryName, isSelected)}
                   strokeWidth={isSelected || commandSources.some(c => c.name === countryName) ? 0.4 : 0.15}
                   vectorEffect="non-scaling-stroke" 
-                  className="transition-all duration-200 hover:opacity-75"
+                  className={`transition-all duration-200 ${isInteractable ? 'hover:opacity-75 cursor-pointer' : 'opacity-50 cursor-default'}`}
                   style={{
                     fillOpacity: commandSources.some(c => c.name === countryName) ? 0.9 : 1,
                   }}
@@ -245,12 +258,8 @@ const Map: React.FC<MapProps> = ({
 
               const isMajor = MAJOR_POWERS.includes(countryName);
               const isDestroyed = countryData?.isDestroyed;
-
-              // If annexed, check who owns it
               const ownerId = countryData?.ownerId;
               const isAnnexed = ownerId && ownerId !== countryName;
-              
-              // If annexed, show the Owner's Name instead of original name
               const labelText = isAnnexed ? ownerId : countryName;
 
               return (

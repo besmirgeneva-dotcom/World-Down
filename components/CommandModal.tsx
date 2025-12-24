@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Country } from '../types';
-import { Swords, ShieldAlert, Ban, Handshake, Skull, X, CheckCircle, Crosshair } from 'lucide-react';
+import { Swords, ShieldAlert, Ban, Handshake, Skull, X, CheckCircle, Crosshair, HeartHandshake } from 'lucide-react';
 
 interface CommandModalProps {
   isOpen: boolean;
@@ -15,6 +15,7 @@ const ACTIONS = [
   { id: 'Blocus Économique', label: 'Blocus Économique', icon: Ban, color: 'text-orange-600', bg: 'bg-orange-50' },
   { id: 'Sabotage', label: 'Sabotage', icon: ShieldAlert, color: 'text-yellow-600', bg: 'bg-yellow-50' },
   { id: 'Alliance', label: 'Former Alliance', icon: Handshake, color: 'text-blue-600', bg: 'bg-blue-50' },
+  { id: 'Amis', label: 'Traité d\'Amitié', icon: HeartHandshake, color: 'text-teal-600', bg: 'bg-teal-50' },
   { id: 'Déclarer Ennemi', label: 'Déclarer Ennemi', icon: Skull, color: 'text-purple-600', bg: 'bg-purple-50' },
 ];
 

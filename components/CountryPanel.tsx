@@ -69,30 +69,34 @@ const CapabilityToggle = ({
   active,
   icon: Icon,
   colorClass,
+  disabled,
   onToggle
 }: {
   label: string;
   active: boolean;
   icon: any;
   colorClass: string;
+  disabled?: boolean;
   onToggle: () => void;
 }) => (
   <div 
-    onClick={onToggle}
+    onClick={!disabled ? onToggle : undefined}
     className={`
-      cursor-pointer flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300
-      ${active ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-50 border-transparent opacity-60 grayscale hover:grayscale-0'}
+      flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300
+      ${disabled ? 'opacity-40 bg-slate-100 cursor-not-allowed border-transparent' : 'cursor-pointer'}
+      ${active && !disabled ? 'bg-white border-slate-200 shadow-sm' : ''}
+      ${!active && !disabled ? 'bg-slate-50 border-transparent opacity-60 grayscale hover:grayscale-0' : ''}
     `}
   >
     <div className="flex items-center gap-2.5">
-       <div className={`p-1.5 rounded-full ${active ? 'bg-slate-100' : 'bg-slate-200'} ${colorClass}`}>
-         <Icon size={14} />
+       <div className={`p-1.5 rounded-full ${active && !disabled ? 'bg-slate-100' : 'bg-slate-200'} ${disabled ? 'text-slate-400' : colorClass}`}>
+         {disabled && !active ? <Lock size={14} /> : <Icon size={14} />}
        </div>
        <span className={`font-bold text-[11px] ${active ? 'text-slate-800' : 'text-slate-500'}`}>{label}</span>
     </div>
     <div className={`
       w-8 h-4 rounded-full relative transition-colors duration-300
-      ${active ? 'bg-green-500' : 'bg-slate-300'}
+      ${active && !disabled ? 'bg-green-500' : 'bg-slate-300'}
     `}>
       <div className={`
         absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all duration-300 shadow-sm
@@ -104,6 +108,10 @@ const CapabilityToggle = ({
 
 const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lockedStats, onStatChange, onToggleCapability, onOpenCommand, onClose, className }) => {
   if (!country) return null;
+
+  // On vérifie si une capacité a déjà été modifiée ce tour ci (Nuclear ou Space présent dans lockedStats)
+  // Si OUI, on verrouille toutes les capacités
+  const hasModifiedCapability = lockedStats.includes(StatType.NUCLEAR) || lockedStats.includes(StatType.SPACE);
 
   return (
     <div className={`bg-white/90 backdrop-blur-xl border border-slate-200 p-6 flex flex-col h-full shadow-2xl overflow-hidden ${className}`}>
@@ -157,6 +165,8 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lock
                 active={country.stats.hasNuclear}
                 icon={Radiation}
                 colorClass="text-orange-600"
+                // Désactivé si : déjà modifié une capacité OU pas de programme spatial (pré-requis)
+                disabled={hasModifiedCapability || (!country.stats.hasNuclear && !country.stats.hasSpaceProgram)}
                 onToggle={() => onToggleCapability(country.name, 'hasNuclear')}
             />
             <CapabilityToggle 
@@ -164,6 +174,8 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lock
                 active={country.stats.hasSpaceProgram}
                 icon={Rocket}
                 colorClass="text-indigo-600"
+                // Désactivé si : déjà modifié une capacité
+                disabled={hasModifiedCapability}
                 onToggle={() => onToggleCapability(country.name, 'hasSpaceProgram')}
             />
             </div>
@@ -182,10 +194,10 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lock
         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-slate-600 shadow-inner">
             <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-2">Rapport d'Intelligence</h3>
             <p className="leading-relaxed text-[10px] font-medium italic opacity-80">
-                {country.stats.military > 80 && country.stats.hasNuclear && "⚠️ Superpuissance militaire nucléaire détectée."}
-                {country.stats.economy < 20 && "⚠️ Risque d'effondrement économique systémique."}
-                {country.stats.hasSpaceProgram && country.stats.economy > 60 && "🚀 Capacité de projection orbitale confirmée."}
-                {!country.stats.hasNuclear && !country.stats.hasSpaceProgram && country.stats.military < 50 && "Secteur neutre en voie de développement."}
+                {!country.stats.hasSpaceProgram && "❌ Pré-requis 'Programme Spatial' manquant pour le nucléaire."}
+                {country.stats.military > 80 && country.stats.hasNuclear && " ⚠️ Superpuissance militaire nucléaire détectée."}
+                {country.stats.economy < 20 && " ⚠️ Risque d'effondrement économique systémique."}
+                {country.stats.hasSpaceProgram && country.stats.economy > 60 && " 🚀 Capacité de projection orbitale confirmée."}
             </p>
         </div>
       </div>
