@@ -1,6 +1,6 @@
 import React from 'react';
 import { Country, StatType } from '../types';
-import { TrendingUp, TrendingDown, Shield, Users, DollarSign, X, Radiation, Rocket, Swords, Lock } from 'lucide-react';
+import { TrendingUp, TrendingDown, Shield, Users, DollarSign, X, Radiation, Rocket, Swords, Lock, AlertCircle } from 'lucide-react';
 
 interface CountryPanelProps {
   country: Country | undefined;
@@ -80,27 +80,45 @@ const CapabilityToggle = ({
   onToggle: () => void;
 }) => (
   <div 
-    onClick={!disabled ? onToggle : undefined}
+    onClick={(e) => {
+        if (!disabled) {
+            onToggle();
+        }
+    }}
     className={`
-      flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300
-      ${disabled ? 'opacity-40 bg-slate-100 cursor-not-allowed border-transparent' : 'cursor-pointer'}
+      flex items-center justify-between p-3 rounded-xl border transition-all duration-200 select-none
+      ${disabled 
+        ? 'bg-slate-100 border-slate-100 opacity-60 cursor-not-allowed' 
+        : 'cursor-pointer hover:border-slate-300 hover:shadow-md'
+      }
       ${active && !disabled ? 'bg-white border-slate-200 shadow-sm' : ''}
-      ${!active && !disabled ? 'bg-slate-50 border-transparent opacity-60 grayscale hover:grayscale-0' : ''}
+      ${!active && !disabled ? 'bg-slate-50 border-slate-200' : ''}
     `}
   >
-    <div className="flex items-center gap-2.5">
-       <div className={`p-1.5 rounded-full ${active && !disabled ? 'bg-slate-100' : 'bg-slate-200'} ${disabled ? 'text-slate-400' : colorClass}`}>
-         {disabled && !active ? <Lock size={14} /> : <Icon size={14} />}
+    <div className="flex items-center gap-3">
+       <div className={`p-2 rounded-full ${active && !disabled ? 'bg-slate-100' : 'bg-slate-200'} ${disabled ? 'text-slate-400' : colorClass}`}>
+         {disabled ? <Lock size={16} /> : <Icon size={16} />}
        </div>
-       <span className={`font-bold text-[11px] ${active ? 'text-slate-800' : 'text-slate-500'}`}>{label}</span>
+       <div className="flex flex-col">
+          <span className={`font-bold text-xs ${active ? 'text-slate-900' : (disabled ? 'text-slate-400' : 'text-slate-600')}`}>
+            {label}
+          </span>
+          {disabled && !active && (
+             <span className="text-[9px] text-red-400 font-medium">Indisponible</span>
+          )}
+          {active && (
+             <span className="text-[9px] text-green-600 font-bold uppercase tracking-wider">Actif</span>
+          )}
+       </div>
     </div>
+    
     <div className={`
-      w-8 h-4 rounded-full relative transition-colors duration-300
-      ${active && !disabled ? 'bg-green-500' : 'bg-slate-300'}
+      w-10 h-5 rounded-full relative transition-colors duration-300
+      ${active && !disabled ? 'bg-green-500' : (disabled ? 'bg-slate-200' : 'bg-slate-300')}
     `}>
       <div className={`
-        absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all duration-300 shadow-sm
-        ${active ? 'left-4.5' : 'left-0.5'}
+        absolute top-1 w-3 h-3 bg-white rounded-full transition-all duration-300 shadow-sm
+        ${active ? 'left-6' : 'left-1'}
       `}></div>
     </div>
   </div>
@@ -110,8 +128,11 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lock
   if (!country) return null;
 
   // On vérifie si une capacité a déjà été modifiée ce tour ci (Nuclear ou Space présent dans lockedStats)
-  // Si OUI, on verrouille toutes les capacités
   const hasModifiedCapability = lockedStats.includes(StatType.NUCLEAR) || lockedStats.includes(StatType.SPACE);
+
+  // Condition spécifique pour le nucléaire : Doit avoir le spatial OU l'avoir déjà (pour pouvoir le désactiver)
+  const canModifyNuclear = !hasModifiedCapability && (country.stats.hasSpaceProgram || country.stats.hasNuclear);
+  const canModifySpace = !hasModifiedCapability;
 
   return (
     <div className={`bg-white/90 backdrop-blur-xl border border-slate-200 p-6 flex flex-col h-full shadow-2xl overflow-hidden ${className}`}>
@@ -159,26 +180,36 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lock
 
         <div>
             <h3 className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-3">Capacités Critiques</h3>
-            <div className="space-y-2">
-            <CapabilityToggle 
-                label="Arsenal Nucléaire"
-                active={country.stats.hasNuclear}
-                icon={Radiation}
-                colorClass="text-orange-600"
-                // Désactivé si : déjà modifié une capacité OU pas de programme spatial (pré-requis)
-                disabled={hasModifiedCapability || (!country.stats.hasNuclear && !country.stats.hasSpaceProgram)}
-                onToggle={() => onToggleCapability(country.name, 'hasNuclear')}
-            />
+            <div className="space-y-3">
             <CapabilityToggle 
                 label="Programme Spatial"
                 active={country.stats.hasSpaceProgram}
                 icon={Rocket}
                 colorClass="text-indigo-600"
-                // Désactivé si : déjà modifié une capacité
-                disabled={hasModifiedCapability}
+                disabled={!canModifySpace}
                 onToggle={() => onToggleCapability(country.name, 'hasSpaceProgram')}
             />
+            <CapabilityToggle 
+                label="Arsenal Nucléaire"
+                active={country.stats.hasNuclear}
+                icon={Radiation}
+                colorClass="text-orange-600"
+                disabled={!canModifyNuclear}
+                onToggle={() => onToggleCapability(country.name, 'hasNuclear')}
+            />
             </div>
+             {!country.stats.hasSpaceProgram && !country.stats.hasNuclear && (
+                 <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-blue-50 text-blue-700 text-[10px] rounded-lg border border-blue-100">
+                    <AlertCircle size={12} />
+                    <span>Développez le spatial pour débloquer le nucléaire.</span>
+                 </div>
+             )}
+             {hasModifiedCapability && (
+                 <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-yellow-50 text-yellow-700 text-[10px] rounded-lg border border-yellow-100">
+                    <Lock size={12} />
+                    <span>Capacité déjà modifiée pour ce tour.</span>
+                 </div>
+             )}
         </div>
         
         <div className="pt-2">
@@ -194,10 +225,10 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lock
         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-slate-600 shadow-inner">
             <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-2">Rapport d'Intelligence</h3>
             <p className="leading-relaxed text-[10px] font-medium italic opacity-80">
-                {!country.stats.hasSpaceProgram && "❌ Pré-requis 'Programme Spatial' manquant pour le nucléaire."}
                 {country.stats.military > 80 && country.stats.hasNuclear && " ⚠️ Superpuissance militaire nucléaire détectée."}
                 {country.stats.economy < 20 && " ⚠️ Risque d'effondrement économique systémique."}
                 {country.stats.hasSpaceProgram && country.stats.economy > 60 && " 🚀 Capacité de projection orbitale confirmée."}
+                {!country.stats.military && "Aucune donnée significative."}
             </p>
         </div>
       </div>
