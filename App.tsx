@@ -57,6 +57,7 @@ export default function App() {
     isSimulating: false,
     gameOver: false,
     tokensUsed: 0,
+    turnModifications: {}, // Initialize empty
   });
 
   const [playerActions, setPlayerActions] = useState<string[]>([]);
@@ -146,6 +147,48 @@ export default function App() {
     } else setGameState(prev => ({ ...prev, selectedCountryId: effectiveOwnerId }));
   };
 
+  // --- STAT MANIPULATION HANDLERS ---
+  const handleStatChange = (countryName: string, stat: StatType, delta: number) => {
+    // Vérifier si cette stat a déjà été modifiée pour ce pays ce tour-ci
+    const currentMods = gameState.turnModifications[countryName] || [];
+    if (currentMods.includes(stat)) {
+        return; // Modification bloquée
+    }
+
+    setGameState(prev => {
+        // Enregistrer la modification
+        const updatedMods = { 
+            ...prev.turnModifications, 
+            [countryName]: [...(prev.turnModifications[countryName] || []), stat] 
+        };
+
+        return {
+            ...prev,
+            turnModifications: updatedMods,
+            countries: prev.countries.map(c => {
+                if (c.name !== countryName) return c;
+                const currentVal = c.stats[stat];
+                if (typeof currentVal === 'number') {
+                    const newVal = Math.max(0, Math.min(100, currentVal + delta));
+                    return { ...c, stats: { ...c.stats, [stat]: newVal } };
+                }
+                return c;
+            })
+        };
+    });
+  };
+
+  const handleToggleCapability = (countryName: string, capability: 'hasNuclear' | 'hasSpaceProgram') => {
+    setGameState(prev => ({
+      ...prev,
+      countries: prev.countries.map(c => {
+        if (c.name !== countryName) return c;
+        return { ...c, stats: { ...c.stats, [capability]: !c.stats[capability] } };
+      })
+    }));
+  };
+  // ----------------------------------
+
   const handleExecuteCommand = () => {
      if (commandSources.length === 0) return;
      const conqueror = commandSources[0]; // Leader ou source principale
@@ -226,7 +269,6 @@ export default function App() {
     setGameState(prev => ({ ...prev, isSimulating: true }));
     
     // TELEMETRIE: Envoi des actions en background (fire and forget)
-    // Cela permettra d'enrichir le moteur narratif plus tard
     trackGameStats(playerActions).catch(console.error);
 
     try {
@@ -256,6 +298,7 @@ export default function App() {
           events: [...prev.events, ...newEvents], 
           tokensUsed: (prev.tokensUsed || 0) + result.tokenUsage,
           isSimulating: false,
+          turnModifications: {}, // RESET des modifications manuelles pour le nouveau tour
         };
       });
 
@@ -308,6 +351,7 @@ export default function App() {
       isSimulating: false,
       gameOver: false,
       tokensUsed: 0,
+      turnModifications: {},
     });
     setView('GAME');
   };
@@ -438,7 +482,16 @@ export default function App() {
         </div>
 
         <div className={`absolute top-6 bottom-6 right-6 w-[360px] transition-transform duration-700 ease-out z-20 ${gameState.selectedCountryId && !isCommandMode ? 'translate-x-0' : 'translate-x-[130%]'}`}>
-             <CountryPanel country={selectedCountry} allCountries={gameState.countries} onStatChange={() => {}} onToggleCapability={() => {}} onOpenCommand={() => setIsCommandMode(true)} onClose={() => setGameState(prev => ({ ...prev, selectedCountryId: null }))} className="h-full rounded-[2rem] border border-slate-100 shadow-[0_30px_60px_rgba(0,0,0,0.06)]" />
+             <CountryPanel 
+                country={selectedCountry} 
+                allCountries={gameState.countries} 
+                lockedStats={gameState.turnModifications[selectedCountry?.name || ''] || []}
+                onStatChange={handleStatChange} 
+                onToggleCapability={handleToggleCapability} 
+                onOpenCommand={() => setIsCommandMode(true)} 
+                onClose={() => setGameState(prev => ({ ...prev, selectedCountryId: null }))} 
+                className="h-full rounded-[2rem] border border-slate-100 shadow-[0_30px_60px_rgba(0,0,0,0.06)]" 
+             />
         </div>
       </main>
     </div>

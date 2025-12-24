@@ -43,6 +43,7 @@ export interface GameState {
   isSimulating: boolean;
   gameOver: boolean;
   tokensUsed: number;
+  turnModifications: Record<string, StatType[]>; // Tracks which stats were changed this turn per country
 }
 
 export enum StatType {

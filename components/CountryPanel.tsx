@@ -1,10 +1,11 @@
 import React from 'react';
 import { Country, StatType } from '../types';
-import { TrendingUp, TrendingDown, Shield, Users, DollarSign, X, Radiation, Rocket, Swords } from 'lucide-react';
+import { TrendingUp, TrendingDown, Shield, Users, DollarSign, X, Radiation, Rocket, Swords, Lock } from 'lucide-react';
 
 interface CountryPanelProps {
   country: Country | undefined;
   allCountries: Country[];
+  lockedStats: StatType[];
   onStatChange: (countryId: string, stat: StatType, delta: number) => void;
   onToggleCapability: (countryId: string, capability: 'hasNuclear' | 'hasSpaceProgram') => void;
   onOpenCommand: (sourceId: string) => void;
@@ -17,6 +18,7 @@ const StatRow = ({
   value, 
   icon: Icon, 
   colorClass, 
+  isLocked,
   onInc, 
   onDec 
 }: { 
@@ -24,28 +26,37 @@ const StatRow = ({
   value: number; 
   icon: any; 
   colorClass: string; 
+  isLocked: boolean;
   onInc: () => void; 
   onDec: () => void; 
 }) => (
-  <div className="flex items-center justify-between mb-3 p-2.5 bg-white/50 rounded-xl border border-slate-200 shadow-sm">
+  <div className={`flex items-center justify-between mb-3 p-2.5 rounded-xl border transition-colors ${isLocked ? 'bg-slate-100 border-slate-100 opacity-70' : 'bg-white/50 border-slate-200 shadow-sm'}`}>
     <div className="flex items-center gap-3">
-      <div className={`p-1.5 rounded-full bg-white shadow-sm ${colorClass}`}>
-        <Icon size={14} />
+      <div className={`p-1.5 rounded-full shadow-sm ${isLocked ? 'bg-slate-200 text-slate-400' : `bg-white ${colorClass}`}`}>
+        {isLocked ? <Lock size={14} /> : <Icon size={14} />}
       </div>
       <div>
         <p className="text-[9px] text-slate-500 uppercase font-black tracking-wider">{label}</p>
         <div className="h-1.5 w-16 bg-slate-200 rounded-full mt-1 overflow-hidden">
-            <div className={`h-full ${colorClass.replace('text-', 'bg-')}`} style={{ width: `${value}%` }}></div>
+            <div className={`h-full ${isLocked ? 'bg-slate-400' : colorClass.replace('text-', 'bg-')}`} style={{ width: `${value}%` }}></div>
         </div>
       </div>
     </div>
     <div className="flex items-center gap-2">
-        <span className={`text-lg font-tech font-bold w-8 text-right ${colorClass}`}>{value}</span>
+        <span className={`text-lg font-tech font-bold w-8 text-right ${isLocked ? 'text-slate-400' : colorClass}`}>{value}</span>
         <div className="flex flex-col gap-0.5">
-            <button onClick={onInc} className="p-0.5 hover:bg-slate-200 rounded text-green-600 transition-colors">
+            <button 
+                onClick={onInc} 
+                disabled={isLocked}
+                className="p-0.5 hover:bg-slate-200 rounded text-green-600 transition-colors disabled:text-slate-300 disabled:cursor-not-allowed"
+            >
                 <TrendingUp size={12} />
             </button>
-            <button onClick={onDec} className="p-0.5 hover:bg-slate-200 rounded text-red-600 transition-colors">
+            <button 
+                onClick={onDec} 
+                disabled={isLocked}
+                className="p-0.5 hover:bg-slate-200 rounded text-red-600 transition-colors disabled:text-slate-300 disabled:cursor-not-allowed"
+            >
                 <TrendingDown size={12} />
             </button>
         </div>
@@ -91,7 +102,7 @@ const CapabilityToggle = ({
   </div>
 );
 
-const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, onStatChange, onToggleCapability, onOpenCommand, onClose, className }) => {
+const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, lockedStats, onStatChange, onToggleCapability, onOpenCommand, onClose, className }) => {
   if (!country) return null;
 
   return (
@@ -114,6 +125,7 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, onSt
                 value={country.stats.economy} 
                 icon={DollarSign} 
                 colorClass="text-emerald-600"
+                isLocked={lockedStats.includes(StatType.ECONOMY)}
                 onInc={() => onStatChange(country.name, StatType.ECONOMY, 5)}
                 onDec={() => onStatChange(country.name, StatType.ECONOMY, -5)}
             />
@@ -122,6 +134,7 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, onSt
                 value={country.stats.military} 
                 icon={Shield} 
                 colorClass="text-rose-600"
+                isLocked={lockedStats.includes(StatType.MILITARY)}
                 onInc={() => onStatChange(country.name, StatType.MILITARY, 5)}
                 onDec={() => onStatChange(country.name, StatType.MILITARY, -5)}
             />
@@ -130,6 +143,7 @@ const CountryPanel: React.FC<CountryPanelProps> = ({ country, allCountries, onSt
                 value={country.stats.population} 
                 icon={Users} 
                 colorClass="text-blue-600"
+                isLocked={lockedStats.includes(StatType.POPULATION)}
                 onInc={() => onStatChange(country.name, StatType.POPULATION, 5)}
                 onDec={() => onStatChange(country.name, StatType.POPULATION, -5)}
             />
