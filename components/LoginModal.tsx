@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, Mail, ShieldCheck, Globe, Loader2, Lock, AlertCircle, Settings } from 'lucide-react';
 import { auth, googleProvider } from '../services/firebase';
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -62,22 +61,22 @@ export default function LoginModal({ isOpen, onClose, onLogin }: LoginModalProps
     setIsLoggingIn(true);
 
     try {
-      let userCredential;
       if (isRegisterMode) {
-        userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         if (userCredential.user) {
-           // @ts-ignore
-           await updateProfile(userCredential.user, { displayName: email.split('@')[0] });
+           await userCredential.user.updateProfile({ displayName: email.split('@')[0] });
         }
       } else {
-        userCredential = await signInWithEmailAndPassword(auth, email, password);
+        await auth.signInWithEmailAndPassword(email, password);
       }
 
-      const user = userCredential.user;
-      onLogin({ 
-        name: user.displayName || user.email?.split('@')[0] || 'Commandant', 
-        email: user.email || '' 
-      });
+      const user = auth.currentUser;
+      if (user) {
+        onLogin({ 
+            name: user.displayName || user.email?.split('@')[0] || 'Commandant', 
+            email: user.email || '' 
+        });
+      }
     } catch (err: any) {
       console.error(err);
       let msg = "Une erreur est survenue.";
@@ -94,12 +93,16 @@ export default function LoginModal({ isOpen, onClose, onLogin }: LoginModalProps
     setError(null);
     setIsLoggingIn(true);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      onLogin({ 
-        name: user.displayName || 'Commandant', 
-        email: user.email || '' 
-      });
+      // In v8, googleProvider is passed directly
+      // But we exported initialized provider from firebase.ts
+      await auth.signInWithPopup(googleProvider);
+      const user = auth.currentUser;
+      if (user) {
+        onLogin({ 
+            name: user.displayName || 'Commandant', 
+            email: user.email || '' 
+        });
+      }
     } catch (err: any) {
       console.error(err);
       let msg = "La connexion Google a échoué.";

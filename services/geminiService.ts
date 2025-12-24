@@ -53,6 +53,12 @@ const getNameFromCodeOrName = (val: string, countries: Country[]) => {
     return c ? c.name : val; 
 }
 
+const getRandomCountry = (countries: Country[], excludeName?: string): string => {
+    const pool = countries.filter(c => c.name !== excludeName && !c.isDestroyed);
+    if (pool.length === 0) return "une nation étrangère";
+    return pool[Math.floor(Math.random() * pool.length)].name;
+};
+
 // --- ENGINE: HYBRID LOGIC ---
 
 // Calcul Local (Moteur mathématique simple) pour les pays passifs
@@ -97,10 +103,9 @@ const serializeWorldState = (countries: Country[]) => {
 const generateFallbackLogic = (actions: string[], countries: Country[]) => {
     const events: string[] = [];
     
+    // 1. Process Player Actions
     actions.forEach(action => {
         const lower = action.toLowerCase();
-        // Extraction basique des noms (très simplifiée pour le fallback)
-        // On suppose que le nom du pays est au début ou mentionné
         const source = countries.find(c => lower.includes(c.name.toLowerCase()))?.name || "Une Nation";
         
         if (lower.includes("alliance")) {
@@ -110,7 +115,7 @@ const generateFallbackLogic = (actions: string[], countries: Country[]) => {
         } else if (lower.includes("quitte")) {
             events.push(decodeEvent("ALLIANCE_LEAVE", source, "ses alliés"));
         } else if (lower.includes("amis") || lower.includes("amitié")) {
-            events.push(decodeEvent("FRIENDSHIP", source, "l'allié"));
+            events.push(decodeEvent("FRIENDSHIP", source, getRandomCountry(countries, source)));
         } else if (lower.includes("annexé") || lower.includes("conquête")) {
             events.push(decodeEvent("WAR_WIN", source, "l'ennemi"));
         } else if (lower.includes("attaque")) {
@@ -121,10 +126,21 @@ const generateFallbackLogic = (actions: string[], countries: Country[]) => {
             events.push(decodeEvent("ECO_BLOCK", source, "la cible"));
         } else if (lower.includes("sabotage")) {
             events.push(decodeEvent("SABOTAGE", source, "la cible"));
+        } else if (lower.includes("politique") || lower.includes("ajusté") || lower.includes("stratégie")) {
+            // New POLITICS handling for stat changes
+            events.push(decodeEvent("POLITICS", source));
         } else {
             events.push(decodeEvent("GENERIC", source, "le monde"));
         }
     });
+
+    // 2. Generate Ambient Events (to make sure we always have 2-3 events minimum)
+    const extraNeeded = Math.max(0, 3 - events.length);
+    for (let i = 0; i < extraNeeded; i++) {
+        const rSrc = getRandomCountry(countries);
+        const rTgt = getRandomCountry(countries, rSrc);
+        events.push(decodeEvent("GENERIC", rSrc, rTgt));
+    }
 
     if (events.length === 0) events.push("Le calme règne avant la tempête. Les marchés observent la situation.");
     return events;
@@ -165,25 +181,25 @@ export const simulateTurn = async (
   const actions = playerActions.join(". ");
 
   // CALCUL DE LA CIBLE D'ÉVÈNEMENTS
-  // Si 1 action joueur -> +2 random events (Total 3)
-  // Si 2 actions joueur -> +1 random event (Total 3)
-  // Si >=3 actions joueur -> 0 random event (Total = Joueur)
+  // On veut toujours au moins 2 évènements aléatoires en plus des actions du joueur.
+  // Et on veut un total minimum de 3-4 évènements pour que le tour semble vivant.
   const playerActionCount = playerActions.length;
-  const randomEventsNeeded = Math.max(0, 3 - playerActionCount);
+  // Si le joueur a fait 1 action, on veut ~3-4 évènements total -> on demande 3 randoms.
+  // Si le joueur a fait 5 actions, on veut quand même 2 randoms pour le chaos mondial.
+  const randomEventsNeeded = Math.max(2, 5 - playerActionCount);
 
   // SYSTEM INSTRUCTION: COMPRESSED LOGIC MODE
-  // On demande à l'IA d'agir comme un moteur logique, pas un écrivain.
-  // Elle doit sortir des CODES que notre moteur interne transformera en beau texte.
   const systemInstruction = `
 ROLE: Geopolitical Simulator Core.
 INPUT: State, History, Actions.
 TASK: 
 1. Determine outcomes of the ${playerActionCount} provided player actions.
 2. Generate exactly ${randomEventsNeeded} additional RANDOM major geopolitical events (involving nations NOT in ACT if possible) to reach a dynamic world state.
+IMPORTANT: Source and Target MUST be different countries for GENERIC, WAR, or DIPLOMACY events.
 OUTPUT FORMAT:
 #E
 EVENT:CODE|SOURCE_CODE|TARGET_CODE|EXTRA_INFO
-(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, FRIENDSHIP, NUKE, ECO_BLOCK, SABOTAGE, GENERIC)
+(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, FRIENDSHIP, NUKE, ECO_BLOCK, SABOTAGE, GENERIC, POLITICS)
 #U
 CODE:Eco:Mil:Pop
 `;
@@ -201,8 +217,8 @@ ACT:${actions}
       contents: prompt,
       config: {
         systemInstruction: systemInstruction,
-        maxOutputTokens: 600, // Réduit car on génère du code compressé
-        temperature: 0.7, // Moins de créativité, plus de logique
+        maxOutputTokens: 800, // Augmenté pour permettre plus d'évènements
+        temperature: 0.8, // Un peu plus créatif pour la variété
       }
     });
 
@@ -226,7 +242,20 @@ ACT:${actions}
                     const [code, srcCode, tgtCode, extra] = raw.split('|');
                     
                     const srcName = getNameFromCodeOrName(srcCode || "UNK", countries);
-                    const tgtName = getNameFromCodeOrName(tgtCode || "UNK", countries);
+                    let tgtName = getNameFromCodeOrName(tgtCode || "UNK", countries);
+
+                    // --- SECURITY CHECK: Prevent Self-Referential Conflicts ---
+                    if (srcName === tgtName) {
+                        if (code === 'POLITICS') {
+                            // C'est normal pour POLITICS (réforme interne), on ne change rien
+                        } else if (code === 'WAR_WIN' || code === 'WAR_LOSS' || code === 'SABOTAGE') {
+                            tgtName = "une faction rebelle"; // Guerre civile
+                        } else {
+                            // Pour diplomatie ou générique, on force un autre pays aléatoire
+                            tgtName = getRandomCountry(countries, srcName);
+                        }
+                    }
+                    // ----------------------------------------------------------
                     
                     // APPEL AU MOTEUR INTERNE
                     const richText = decodeEvent(code, srcName, tgtName, extra);

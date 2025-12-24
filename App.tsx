@@ -14,7 +14,6 @@ import { simulateTurn } from './services/geminiService';
 import { auth } from './services/firebase';
 import { getUserSaves, saveGameToFirestore, deleteSaveFromFirestore, GameSaveData } from './services/saveService';
 import { trackGameStats } from './services/statsService';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { Globe, Play, Loader2, Swords, History, Users, Settings, Eye, Cpu, AlertCircle } from 'lucide-react';
 
 const INITIAL_ALLIANCES: Alliance[] = [
@@ -37,6 +36,40 @@ const INITIAL_COUNTRIES: Country[] = [
 ];
 
 type ViewMode = 'HOME' | 'HUB' | 'GAME';
+
+// Helper pour générer des stats réalistes basées sur le nom du pays
+const generateRandomStats = (name: string) => {
+    // Mots-clés pour identifier les économies avancées/riches (heuristique simple)
+    const RICH_KEYWORDS = [
+      "United States", "Kingdom", "Germany", "France", "Japan", "Canada", "Australia", 
+      "Italy", "Spain", "Netherlands", "Switzerland", "Sweden", "Norway", "Denmark", 
+      "Finland", "Belgium", "Austria", "New Zealand", "Ireland", "Singapore", "Israel",
+      "Korea", "Emirates", "Qatar", "Luxembourg"
+    ];
+  
+    const isRich = RICH_KEYWORDS.some(k => name.includes(k));
+    
+    const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+  
+    if (isRich) {
+      // Pays riches : stats entre 25 et 35 (sauf population qui varie plus)
+      return {
+        economy: rand(25, 35),
+        military: rand(20, 35),
+        population: rand(15, 35)
+      };
+    } else {
+      // Autres pays : stats entre 10 et 25
+      return {
+        economy: rand(10, 25),
+        military: rand(10, 25),
+        population: rand(10, 30)
+      };
+    }
+};
+
+// Helper pour clamer les valeurs entre 0 et 100
+const clamp = (val: number) => Math.max(0, Math.min(100, val));
 
 export default function App() {
   const [view, setView] = useState<ViewMode>('HOME');
@@ -76,7 +109,7 @@ export default function App() {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser: any) => {
       if (firebaseUser) {
         setUser({
           uid: firebaseUser.uid,
@@ -118,7 +151,7 @@ export default function App() {
   const handleLogout = async () => {
     if (!auth) return;
     try {
-      await signOut(auth);
+      await auth.signOut();
       setSaves([]); 
     } catch (error) {
       console.error("Logout failed", error);
@@ -128,7 +161,17 @@ export default function App() {
   const handleCountrySelect = (id: string) => {
     let country = gameState.countries.find(c => c.name === id);
     if (!country) {
-       country = { id, name: id, stats: { economy: 50, military: 50, population: 50, hasNuclear: false, hasSpaceProgram: false } };
+       // GÉNÉRATION ALÉATOIRE (10-35) AU LIEU DE 50
+       const randomStats = generateRandomStats(id);
+       country = { 
+           id, 
+           name: id, 
+           stats: { 
+               ...randomStats, 
+               hasNuclear: false, 
+               hasSpaceProgram: false 
+           } 
+       };
        setGameState(prev => ({ ...prev, countries: [...prev.countries, country!] }));
     }
 
@@ -250,53 +293,100 @@ export default function App() {
      if (commandSources.length === 0) return;
      const conqueror = commandSources[0]; // Leader ou source principale
      
+     // --- 1. VALIDATION DES RÈGLES ---
+     
+     if (commandAction === 'Alliance') {
+        // RÈGLE: Min 35 Economie pour créer
+        if (conqueror.stats.economy < 35) {
+            alert("Économie insuffisante (Min 35) pour fonder une alliance.");
+            return;
+        }
+     }
+     
+     if (commandAction === 'Rejoindre Alliance') {
+        // RÈGLE: On ne peut pas rejoindre une autre alliance si on est déjà dans une alliance.
+        if (conqueror.allianceId) {
+            alert(`Action impossible : ${conqueror.name} doit d'abord quitter son alliance actuelle.`);
+            return;
+        }
+        // RÈGLE: Min 20 Economie pour rejoindre
+        if (conqueror.stats.economy < 20) {
+            alert("Économie insuffisante (Min 20) pour intégrer une alliance.");
+            return;
+        }
+     }
+
+     if (commandAction === 'Attaque Militaire') {
+         // RÈGLE: Min 45 Militaire pour déclarer guerre
+         if (conqueror.stats.military < 45) {
+             alert("Puissance militaire insuffisante (Min 45) pour déclarer une guerre.");
+             return;
+         }
+     }
+
+     if (commandAction === 'Annexer' && commandTarget) {
+         // RÈGLE: Avoir +5 dans chaque stat par rapport à la cible
+         const diffEco = conqueror.stats.economy - commandTarget.stats.economy;
+         const diffMil = conqueror.stats.military - commandTarget.stats.military;
+         const diffPop = conqueror.stats.population - commandTarget.stats.population;
+
+         if (diffEco <= 5 || diffMil <= 5 || diffPop <= 5) {
+             alert("Domination insuffisante : Vous devez avoir au moins +5 de plus que la cible dans CHAQUE statistique (Éco, Mil, Pop) pour annexer.");
+             return;
+         }
+     }
+
+     if (commandAction === 'Soutien Militaire') {
+         // RÈGLE: Min 10 Militaire
+         if (conqueror.stats.military < 10) {
+             alert("Forces militaires insuffisantes (Min 10) pour envoyer du soutien.");
+             return;
+         }
+     }
+
+     // --- 2. EXÉCUTION & COÛTS ---
+
      // Copie profonde pour modification locale optimiste
      let updatedCountries = [...gameState.countries];
      let updatedAlliances = [...gameState.alliances];
      let commandDesc = "";
 
-     // --- Validation des Règles Spéciales ---
-     
-     if (commandAction === 'Rejoindre Alliance') {
-        // RÈGLE: On ne peut pas rejoindre une autre alliance si on est déjà dans une alliance.
-        if (conqueror.allianceId) {
-            alert(`Action impossible : ${conqueror.name} doit d'abord quitter son alliance actuelle (${updatedAlliances.find(a => a.id === conqueror.allianceId)?.name}).`);
-            return;
-        }
-     }
-
      // --- Logique Locale pour mise à jour immédiate ---
      
      if (commandAction === 'Annexer' && commandTarget) {
-        updatedCountries = updatedCountries.map(c => c.name === commandTarget.name ? { ...c, ownerId: conqueror.name, isDestroyed: false } : c);
+        // COÛT: -15 Economie
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === conqueror.name) return { ...c, stats: { ...c.stats, economy: clamp(c.stats.economy - 15) } };
+            if (c.name === commandTarget.name) return { ...c, ownerId: conqueror.name, isDestroyed: false };
+            return c;
+        });
         commandDesc = `CONQUÊTE: ${conqueror.name} a annexé ${commandTarget.name}.`;
      
      } else if (commandAction === 'Alliance') {
+        // COÛT: -15 Economie
         const allianceName = `Coalition ${conqueror.name}`;
         const allianceId = `ALL_${Date.now()}`;
-        // Couleur aléatoire vibrante
         const colors = ['#ec4899', '#8b5cf6', '#14b8a6', '#f59e0b', '#6366f1'];
         const color = colors[Math.floor(Math.random() * colors.length)];
         
-        const newAlliance: Alliance = {
-            id: allianceId,
-            name: allianceName,
-            color: color,
-            leaderId: conqueror.name
-        };
+        const newAlliance: Alliance = { id: allianceId, name: allianceName, color: color, leaderId: conqueror.name };
         updatedAlliances.push(newAlliance);
 
-        // Mettre à jour les pays sources
-        updatedCountries = updatedCountries.map(c => 
-            commandSources.some(s => s.name === c.name) ? { ...c, allianceId: allianceId } : c
-        );
+        updatedCountries = updatedCountries.map(c => {
+             if (commandSources.some(s => s.name === c.name)) {
+                 const newStats = c.name === conqueror.name 
+                    ? { ...c.stats, economy: clamp(c.stats.economy - 15) } 
+                    : c.stats;
+                 return { ...c, allianceId: allianceId, stats: newStats };
+             }
+             return c;
+        });
         commandDesc = `DIPLOMATIE: Création de l'alliance "${allianceName}" par ${conqueror.name}.`;
 
      } else if (commandAction === 'Rejoindre Alliance' && commandTarget) {
-        // commandTarget doit être le LEADER de l'alliance cible
         const targetAllianceId = commandTarget.allianceId;
-        
         if (targetAllianceId) {
+            // Pas de coût explicite demandé pour rejoindre, juste prérequis
             updatedCountries = updatedCountries.map(c => 
                 commandSources.some(s => s.name === c.name) ? { ...c, allianceId: targetAllianceId } : c
             );
@@ -305,10 +395,82 @@ export default function App() {
         }
 
      } else if (commandAction === 'Quitter Alliance') {
+        // COÛT: -15 Economie
         updatedCountries = updatedCountries.map(c => 
-            commandSources.some(s => s.name === c.name) ? { ...c, allianceId: null } : c
+            commandSources.some(s => s.name === c.name) 
+                ? { ...c, allianceId: null, stats: { ...c.stats, economy: clamp(c.stats.economy - 15) } } 
+                : c
         );
-        commandDesc = `DIPLOMATIE: ${conqueror.name} quitte son alliance.`;
+        commandDesc = `DIPLOMATIE: ${conqueror.name} quitte son alliance (-15 Économie).`;
+
+     } else if (commandAction === 'Attaque Militaire' && commandTarget) {
+        // COÛT: -15 Mil, -15 Eco, -10 Pop pour les DEUX
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === conqueror.name || c.name === commandTarget.name) {
+                return {
+                    ...c,
+                    stats: {
+                        ...c.stats,
+                        military: clamp(c.stats.military - 15),
+                        economy: clamp(c.stats.economy - 15),
+                        population: clamp(c.stats.population - 10)
+                    }
+                };
+            }
+            return c;
+        });
+        commandDesc = `GUERRE: ${conqueror.name} déclare la guerre à ${commandTarget.name}. Lourdes pertes bilatérales immédiates.`;
+
+     } else if (commandAction === 'Soutien Militaire' && commandTarget) {
+        // COÛT: -10 Militaire pour la source
+        // BENEFICE: +10 Militaire pour la cible (Impliqué par "Soutien")
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === conqueror.name) return { ...c, stats: { ...c.stats, military: clamp(c.stats.military - 10) } };
+            if (c.name === commandTarget.name) return { ...c, stats: { ...c.stats, military: clamp(c.stats.military + 10) } };
+            return c;
+        });
+        commandDesc = `LOGISTIQUE: ${conqueror.name} envoie du matériel militaire à ${commandTarget.name}.`;
+
+     } else if (commandAction === 'Frappe Nucléaire' && commandTarget) {
+        // IMPACT CIBLE: -30 Eco, -40 Mil, -40 Pop
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === commandTarget.name) {
+                return {
+                    ...c,
+                    stats: {
+                        ...c.stats,
+                        economy: clamp(c.stats.economy - 30),
+                        military: clamp(c.stats.military - 40),
+                        population: clamp(c.stats.population - 40)
+                    }
+                };
+            }
+            return c;
+        });
+        commandDesc = `APOCALYPSE: ${conqueror.name} a lancé une frappe nucléaire sur ${commandTarget.name}. Dévastation totale confirmée.`;
+
+     } else if (commandAction === 'Blocus Économique' && commandTarget) {
+        // IMPACT: Entre -10 et -30 Eco selon l'Eco de l'attaquant
+        // Formule: Base 10 + (EcoAttaquant / 100 * 20) -> Si Eco=100, Bonus=20, Total=30.
+        const damage = Math.floor(10 + (conqueror.stats.economy / 100 * 20));
+        
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === commandTarget.name) {
+                return { ...c, stats: { ...c.stats, economy: clamp(c.stats.economy - damage) } };
+            }
+            return c;
+        });
+        commandDesc = `GUERRE ÉCONOMIQUE: Blocus imposé par ${conqueror.name}. L'économie de ${commandTarget.name} s'effondre de -${damage}%.`;
+
+     } else if (commandAction === 'Sabotage' && commandTarget) {
+        // IMPACT: -5 Militaire sur la cible
+        updatedCountries = updatedCountries.map(c => {
+            if (c.name === commandTarget.name) {
+                return { ...c, stats: { ...c.stats, military: clamp(c.stats.military - 5) } };
+            }
+            return c;
+        });
+        commandDesc = `ESPIONNAGE: Sabotage réussi des infrastructures militaires de ${commandTarget.name} (-5%).`;
 
      } else if (commandAction === 'Amis' && commandTarget) {
         // ACTION AMIS : Bonus économique mutuel + Narrative
@@ -322,7 +484,7 @@ export default function App() {
         commandDesc = `DIPLOMATIE: Traité d'amitié et de coopération économique signé entre ${conqueror.name} et ${commandTarget.name}.`;
 
      } else {
-        // Actions sans changement structurel (juste narratif + stats API)
+        // Actions sans changement structurel immédiat (Declarer Ennemi, etc.)
         commandDesc = `ORDRE: ${commandSources.map(s => s.name).join(', ')} exécute ${commandAction} ${commandTarget ? `sur ${commandTarget.name}` : ''}.`;
      }
 

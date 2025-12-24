@@ -35,6 +35,14 @@ const TEMPLATES: Record<string, string[]> = {
     "ALLIÉS ÉCONOMIQUES : Un pont commercial est établi entre {source} et {target}, scellant une amitié durable basée sur la prospérité partagée."
   ],
 
+  // --- POLITIQUE INTERNE (Stats) ---
+  "POLITICS": [
+    "RÉFORMES MAJEURES : {source} lance un vaste plan de restructuration nationale. Le gouvernement promet des résultats rapides.",
+    "DISCOURS PRÉSIDENTIEL : Le leader de {source} galvanise la nation avec de nouvelles directives stratégiques prioritaires.",
+    "CHANGEMENT DE CAP : {source} ajuste sa stratégie globale pour répondre aux défis du siècle. Les analystes observent la situation de près.",
+    "MOBILISATION : {source} débloque des fonds d'urgence pour accélérer son développement. La population est mise à contribution."
+  ],
+
   // --- NUCLÉAIRE ---
   "NUKE": [
     "APOCALYPSE NOW : Un champignon atomique s'élève au-dessus de {target}. {source} a franchi la ligne rouge absolue. Le monde retient son souffle en attendant une riposte qui pourrait signifier la fin de la civilisation.",
@@ -60,7 +68,9 @@ const TEMPLATES: Record<string, string[]> = {
   // --- GÉNÉRIQUE / FALLBACK ---
   "GENERIC": [
     "TENSIONS VIVES : Les relations entre {source} et {target} atteignent un point de rupture. Des mouvements de troupes suspects sont signalés le long de la frontière.",
-    "INCIDENT DIPLOMATIQUE : L'ambassadeur de {target} a été convoqué par {source} suite à des déclarations incendiaires. La rhétorique guerrière s'intensifie de part et d'autre."
+    "INCIDENT DIPLOMATIQUE : L'ambassadeur de {target} a été convoqué par {source} suite à des déclarations incendiaires. La rhétorique guerrière s'intensifie de part et d'autre.",
+    "MANOEUVRES MILITAIRES : {source} lance des exercices à grande échelle près des eaux territoriales de {target}. Une démonstration de force qui inquiète la région.",
+    "CRISE FRONTALIÈRE : Des escarmouches ont été signalées entre les patrouilles de {source} et {target}. L'ONU appelle au calme immédiat."
   ]
 };
 

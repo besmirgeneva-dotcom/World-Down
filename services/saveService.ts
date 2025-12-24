@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, Timestamp } from 'firebase/firestore';
+import firebase from 'firebase/compat/app';
 import { GameState } from '../types';
 
 export interface GameSaveData {
@@ -22,14 +22,13 @@ export const saveGameToFirestore = async (userId: string, gameState: GameState, 
     userId,
     name: saveName,
     date: saveDisplayDate,
-    timestamp: Timestamp.now(),
+    timestamp: firebase.firestore.Timestamp.now(),
     status,
     gameState: gameState // On stocke tout l'état du jeu
   };
 
   // Chemin : users/{userId}/saves
-  const savesCollectionRef = collection(db, 'users', userId, 'saves');
-  const docRef = await addDoc(savesCollectionRef, saveData);
+  const docRef = await db.collection('users').doc(userId).collection('saves').add(saveData);
   
   return { ...saveData, id: docRef.id };
 };
@@ -37,11 +36,11 @@ export const saveGameToFirestore = async (userId: string, gameState: GameState, 
 export const getUserSaves = async (userId: string): Promise<GameSaveData[]> => {
   if (!db) return [];
 
-  const savesCollectionRef = collection(db, 'users', userId, 'saves');
-  const q = query(savesCollectionRef, orderBy('timestamp', 'desc'));
+  const snapshot = await db.collection('users').doc(userId).collection('saves')
+    .orderBy('timestamp', 'desc')
+    .get();
   
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({
+  return snapshot.docs.map(doc => ({
     id: doc.id,
     ...doc.data()
   } as GameSaveData));
@@ -49,6 +48,5 @@ export const getUserSaves = async (userId: string): Promise<GameSaveData[]> => {
 
 export const deleteSaveFromFirestore = async (userId: string, saveId: string) => {
   if (!db) return;
-  const saveDocRef = doc(db, 'users', userId, 'saves', saveId);
-  await deleteDoc(saveDocRef);
+  await db.collection('users').doc(userId).collection('saves').doc(saveId).delete();
 };

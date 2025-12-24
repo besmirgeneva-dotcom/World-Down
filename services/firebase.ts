@@ -1,6 +1,6 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import firebase from "firebase/compat/app";
+import "firebase/compat/auth";
+import "firebase/compat/firestore";
 
 // Fonction de récupération des variables d'environnement compatible Vite/Next/CRA
 const getEnv = (key: string) => {
@@ -36,21 +36,13 @@ const config = {
 };
 
 // Initialisation sécurisée
-let app;
-let authInstance;
-let dbInstance;
-
 const hasValidConfig = config.apiKey && config.projectId && config.authDomain;
 
 if (hasValidConfig) {
   try {
-    if (!getApps().length) {
-      app = initializeApp(config);
-    } else {
-      app = getApp();
+    if (!firebase.apps.length) {
+      firebase.initializeApp(config);
     }
-    authInstance = getAuth(app);
-    dbInstance = getFirestore(app);
   } catch (error) {
     console.error("Firebase Initialization Error:", error);
   }
@@ -59,6 +51,9 @@ if (hasValidConfig) {
   console.warn("⚠️ Firebase Config manquante. Vérifiez vos variables d'environnement.");
 }
 
-export const auth = authInstance;
-export const db = dbInstance;
-export const googleProvider = new GoogleAuthProvider();
+// Export instances (compat v8 syntax)
+export const auth = hasValidConfig ? firebase.auth() : undefined;
+export const db = hasValidConfig ? firebase.firestore() : undefined;
+export const googleProvider = hasValidConfig ? new firebase.auth.GoogleAuthProvider() : undefined;
+
+export default firebase;

@@ -1,5 +1,5 @@
-import { doc, updateDoc, increment, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import firebase from 'firebase/compat/app';
 
 /**
  * Analyse les actions textuelles brutes et met à jour les compteurs globaux dans Firestore.
@@ -8,7 +8,9 @@ import { db } from './firebase';
 export const trackGameStats = async (actions: string[]) => {
   if (!db) return;
 
-  const statsRef = doc(db, 'analytics', 'global_trends');
+  const statsRef = db.collection('analytics').doc('global_trends');
+  const increment = firebase.firestore.FieldValue.increment;
+  
   const updates: Record<string, any> = {
     total_actions: increment(actions.length)
   };
@@ -36,20 +38,19 @@ export const trackGameStats = async (actions: string[]) => {
 
   try {
     // On essaie de mettre à jour
-    await updateDoc(statsRef, updates);
+    await statsRef.update(updates);
   } catch (e: any) {
     // Si le document n'existe pas (première exécution jamais faite), on le crée
-    if (e.code === 'not-found') {
-        // On convertit les increments en nombres simples pour l'initialisation
-        const initialData: any = {};
-        for (const [key, val] of Object.entries(updates)) {
-            // @ts-ignore - On sait que c'est un FieldValue increment, mais pour l'init on met 1 ou value
-            initialData[key] = 1; 
-        }
-        await setDoc(statsRef, initialData);
-    } else {
-        console.warn("Erreur télémétrie:", e);
-    }
+    // On convertit les increments en nombres simples pour l'initialisation si nécessaire, 
+    // ou on utilise set avec merge (mais merge avec increment fonctionne bien en v9, en v8 set + merge peut être mieux)
+    
+    // Pour v8 simple, si update fail, on fait set.
+    // Mais set avec increment fonctionne aussi pour initialiser.
+    
+    // Alternative: lire avant. Mais ici on va tenter le set direct si update fail.
+    // On refait updates sans increment pour l'init car on part de 0? 
+    // Non, increment(1) sur un champ vide le met à 1.
+    await statsRef.set(updates, { merge: true });
   }
 };
 
@@ -59,8 +60,8 @@ export const trackGameStats = async (actions: string[]) => {
 export const getGlobalStats = async () => {
     if (!db) return null;
     try {
-        const snap = await getDoc(doc(db, 'analytics', 'global_trends'));
-        if (snap.exists()) return snap.data();
+        const snap = await db.collection('analytics').doc('global_trends').get();
+        if (snap.exists) return snap.data();
         return null;
     } catch (e) {
         return null;
