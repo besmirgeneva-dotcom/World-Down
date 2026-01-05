@@ -491,7 +491,8 @@ export default function App() {
      setGameState(prev => ({ 
          ...prev, 
          countries: updatedCountries,
-         alliances: updatedAlliances
+         alliances: updatedAlliances,
+         selectedCountryId: null // DÉSÉLECTIONNER LE PAYS APRÈS UNE ACTION
      }));
      
      setPlayerActions(prev => [...prev, commandDesc]);
@@ -656,7 +657,23 @@ export default function App() {
         />
       )}
 
-      {isCommandMode && <CommandBar sources={commandSources} target={commandTarget} action={commandAction} onActionChange={setCommandAction} activeSlot={activeCommandSlot} onSlotClick={setActiveCommandSlot} onExecute={handleExecuteCommand} onCancel={() => setIsCommandMode(false)} />}
+      {isCommandMode && (
+        <CommandBar 
+          sources={commandSources} 
+          target={commandTarget} 
+          action={commandAction} 
+          onActionChange={setCommandAction} 
+          activeSlot={activeCommandSlot} 
+          onSlotClick={setActiveCommandSlot} 
+          onExecute={handleExecuteCommand} 
+          onCancel={() => {
+              setIsCommandMode(false);
+              setCommandSources([]);
+              setCommandTarget(null);
+              setGameState(prev => ({ ...prev, selectedCountryId: null })); // DÉSÉLECTIONNER LE PAYS LORS DE L'ANNULATION
+          }} 
+        />
+      )}
       
       <header className="h-20 border-b border-slate-100 bg-white/95 flex items-center justify-between px-8 backdrop-blur-md z-10 relative shadow-sm flex-shrink-0">
         <div className="flex items-center gap-6">
