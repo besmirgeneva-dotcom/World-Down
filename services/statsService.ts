@@ -40,17 +40,18 @@ export const trackGameStats = async (actions: string[]) => {
     // On essaie de mettre à jour
     await statsRef.update(updates);
   } catch (e: any) {
-    // Si le document n'existe pas (première exécution jamais faite), on le crée
-    // On convertit les increments en nombres simples pour l'initialisation si nécessaire, 
-    // ou on utilise set avec merge (mais merge avec increment fonctionne bien en v9, en v8 set + merge peut être mieux)
-    
-    // Pour v8 simple, si update fail, on fait set.
-    // Mais set avec increment fonctionne aussi pour initialiser.
-    
-    // Alternative: lire avant. Mais ici on va tenter le set direct si update fail.
-    // On refait updates sans increment pour l'init car on part de 0? 
-    // Non, increment(1) sur un champ vide le met à 1.
-    await statsRef.set(updates, { merge: true });
+    // Si permission refusée, on ignore silencieusement pour ne pas polluer la console (analytics non critique)
+    if (e.code === 'permission-denied') return;
+
+    // Si le document n'existe pas, on tente de le créer
+    try {
+        await statsRef.set(updates, { merge: true });
+    } catch (innerE: any) {
+        // On ignore aussi les permissions ici
+        if (innerE.code !== 'permission-denied') {
+            console.warn("Stats tracking error:", innerE);
+        }
+    }
   }
 };
 
@@ -64,6 +65,7 @@ export const getGlobalStats = async () => {
         if (snap.exists) return snap.data();
         return null;
     } catch (e) {
+        // Ignore errors
         return null;
     }
 };

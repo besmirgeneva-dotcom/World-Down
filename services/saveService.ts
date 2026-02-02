@@ -36,17 +36,30 @@ export const saveGameToFirestore = async (userId: string, gameState: GameState, 
 export const getUserSaves = async (userId: string): Promise<GameSaveData[]> => {
   if (!db) return [];
 
-  const snapshot = await db.collection('users').doc(userId).collection('saves')
-    .orderBy('timestamp', 'desc')
-    .get();
-  
-  return snapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data()
-  } as GameSaveData));
+  try {
+    const snapshot = await db.collection('users').doc(userId).collection('saves')
+        .orderBy('timestamp', 'desc')
+        .get();
+    
+    return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+    } as GameSaveData));
+  } catch (error: any) {
+      if (error.code === 'permission-denied') {
+          console.warn("Accès aux sauvegardes refusé (Permissions insufisantes).");
+          return [];
+      }
+      console.error("Erreur récupération sauvegardes:", error);
+      return [];
+  }
 };
 
 export const deleteSaveFromFirestore = async (userId: string, saveId: string) => {
   if (!db) return;
-  await db.collection('users').doc(userId).collection('saves').doc(saveId).delete();
+  try {
+      await db.collection('users').doc(userId).collection('saves').doc(saveId).delete();
+  } catch (error: any) {
+      console.error("Erreur suppression sauvegarde:", error);
+  }
 };

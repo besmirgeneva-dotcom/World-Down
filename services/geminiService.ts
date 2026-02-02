@@ -177,16 +177,17 @@ export const simulateTurn = async (
   });
 
   const worldState = serializeWorldState(relevantCountries);
-  const history = recentEvents.slice(-3).map(e => `T${e.turn}:${e.description.substring(0, 20)}`).join('|');
+  
+  // OPTIMIZATION: Reduced history depth to 10
+  const history = recentEvents.slice(-10).map(e => `T${e.turn}: ${e.description}`).join('\n');
   const actions = playerActions.join(". ");
 
   // CALCUL DE LA CIBLE D'ÉVÈNEMENTS
   // On veut toujours au moins 2 évènements aléatoires en plus des actions du joueur.
   // Et on veut un total minimum de 3-4 évènements pour que le tour semble vivant.
   const playerActionCount = playerActions.length;
-  // Si le joueur a fait 1 action, on veut ~3-4 évènements total -> on demande 3 randoms.
-  // Si le joueur a fait 5 actions, on veut quand même 2 randoms pour le chaos mondial.
-  const randomEventsNeeded = Math.max(2, 5 - playerActionCount);
+  // INCREASED BASE ACTIVITY
+  const randomEventsNeeded = Math.max(3, 6 - playerActionCount);
 
   // SYSTEM INSTRUCTION: COMPRESSED LOGIC MODE
   const systemInstruction = `
@@ -194,12 +195,12 @@ ROLE: Geopolitical Simulator Core.
 INPUT: State, History, Actions.
 TASK: 
 1. Determine outcomes of the ${playerActionCount} provided player actions.
-2. Generate exactly ${randomEventsNeeded} additional RANDOM major geopolitical events (involving nations NOT in ACT if possible) to reach a dynamic world state.
+2. Generate between ${randomEventsNeeded} and ${randomEventsNeeded + 3} additional RANDOM major geopolitical events (involving nations NOT in ACT if possible) to reach a dynamic world state.
 IMPORTANT: Source and Target MUST be different countries for GENERIC, WAR, or DIPLOMACY events.
 OUTPUT FORMAT:
 #E
 EVENT:CODE|SOURCE_CODE|TARGET_CODE|EXTRA_INFO
-(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, FRIENDSHIP, NUKE, ECO_BLOCK, SABOTAGE, GENERIC, POLITICS)
+(Codes: WAR_WIN, WAR_LOSS, ALLIANCE_NEW, ALLIANCE_JOIN, ALLIANCE_LEAVE, FRIENDSHIP, NUKE, ECO_BLOCK, SABOTAGE, GENERIC, POLITICS, MILITARY_SUPPORT, DECLARE_ENEMY)
 #U
 CODE:Eco:Mil:Pop
 `;
@@ -217,8 +218,8 @@ ACT:${actions}
       contents: prompt,
       config: {
         systemInstruction: systemInstruction,
-        maxOutputTokens: 800, // Augmenté pour permettre plus d'évènements
-        temperature: 0.8, // Un peu plus créatif pour la variété
+        maxOutputTokens: 2000, // REDUCED TOKEN LIMIT
+        temperature: 0.9, 
       }
     });
 
